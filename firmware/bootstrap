@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+rustup target add --toolchain stable thumbv6m-none-eabi thumbv7m-none-eabi thumbv7em-none-eabi thumbv7em-none-eabihf
+rustup target add --toolchain nightly thumbv6m-none-eabi thumbv7m-none-eabi thumbv7em-none-eabi thumbv7em-none-eabihf
+
+#possibly not needed but listed in embedded book
+if ! cargo nm -V >/dev/null 2>&1; then
+    cargo install -f cargo-binutils            
+fi
+rustup component add --toolchain stable llvm-tools-preview
+rustup component add --toolchain nightly llvm-tools-preview
+
+cargo check
+cargo build
+cargo doc
+cargo +nightly build

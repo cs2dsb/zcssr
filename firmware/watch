@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+cargo +nightly watch -x "build --release --features itm"
