@@ -2,6 +2,9 @@
 
 A PCB and software for a SSR controller that monitors mains AC zero crossings to determine when to turn the SSR on.
 
+![Image of v0.1 fully assembled](docs/img/smd_0.1_complete.jpg)
+[more images](docs/img/README.md)
+
 ## Why
 
 I wanted to build a spot welder from an old MOT (microwave oven transformer) but wasn't satisfied with simply enabling the SSR at random because this makes the pulse +/- 1 half mains cycle (10ms on 50Hz, 8.3ms on 60Hz). It probably doesn't make much difference in the grand scheme of things but I wanted to know exactly how long the pulses were. 

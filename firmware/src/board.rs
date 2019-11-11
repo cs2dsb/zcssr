@@ -137,7 +137,7 @@ impl FlashSize {
 
 
 /********************************************** 
-    * V1.2 Board:
+    * V0.2 Board:
 
 /// Debug LED on PCB near MCU
 /// TIM3_CH2
