@@ -175,7 +175,7 @@ pub type Ntc            = PB1<Analog>;
 /// TIM2_CH1
 pub type ZcRising       = PA0<Input<Floating>>;
 /// Input from zero crossing detection circuit. Active low
-/// TIM2_CH1
+/// TIM2_CH2
 pub type ZcFalling      = PA1<Input<Floating>>;
 
 /// User input trigger. Active low

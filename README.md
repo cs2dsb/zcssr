@@ -3,7 +3,7 @@
 A PCB and software for a SSR controller that monitors mains AC zero crossings to determine when to turn the SSR on.
 
 ![Image of v0.1 fully assembled](docs/img/smd_0.1_complete.jpg)
-[more images](docs/img/README.md)
+[more images](docs/img)
 
 ## Why
 
