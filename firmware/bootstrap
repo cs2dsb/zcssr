@@ -7,10 +7,15 @@ rustup target add --toolchain nightly thumbv6m-none-eabi thumbv7m-none-eabi thum
 if ! cargo nm -V >/dev/null 2>&1; then
     cargo install -f cargo-binutils            
 fi
+
+if ! cargo watch -V >/dev/null 2>&1; then
+    cargo install -f cargo-watch
+fi
+
 rustup component add --toolchain stable llvm-tools-preview
 rustup component add --toolchain nightly llvm-tools-preview
 
-cargo check
-cargo build
-cargo doc
+cargo +nightly check
+cargo +nightly build
+cargo +nightly doc
 cargo +nightly build

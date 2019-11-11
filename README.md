@@ -54,6 +54,18 @@ Not a complete list. Will add to it as features get implemented
   * [adafruit-alphanum4.rs driver for Adafruit 14-segment LED Alphanumeric Backpack](http://github.com/cs2dsb/adafruit-alphanum4.rs)
     * [ht16k33 LED driver](http://github.com/jasonpeacock/ht16k33)
 
+## Documentation
+
+Check [the docs folder](docs) for information on setting up the dev environment and various info on making the hardware.
+
+## Disclaimer
+
+* This project uses mains electricity and will kill you if you handle it improperly
+* You are responsible for your own safety
+* Despite best efforts the author makes no guarantees that this design is safe, fit for purpose or meets any quality standards
+* If you decide to build this or a similar device you must understand and take necessary safety precautions before proceeding
+* The author cannot be held responsible for any damages or any form of loss that comes as a result of using any information found in this project
+
 ## License
 
 This template is licensed under either of

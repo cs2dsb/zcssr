@@ -1,4 +1,4 @@
-rm print.zip
+rm -f print.zip
 
 #JLC need "Mid X" and "Mid Y" instead of PosX and PosY
 find . -type f -name '*pos.csv' -exec sed -i 's/PosX/Mid X/g ; s/PosY/Mid Y/g' {} \;
