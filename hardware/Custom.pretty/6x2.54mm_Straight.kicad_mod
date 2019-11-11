@@ -1,0 +1,16 @@
+(module 6x2.54mm_Straight (layer F.Cu) (tedit 5C464225)
+  (descr "Connector Headers with Friction Lock, 22-27-2031, http://www.molex.com/pdm_docs/sd/022272021_sd.pdf")
+  (tags "connector molex kk_6410 22-27-2031")
+  (fp_text reference REF** (at 0.95 -2.2) (layer F.SilkS) hide
+    (effects (font (size 1 1) (thickness 0.15)))
+  )
+  (fp_text value 6x2.54mm_Straight (at 0.85 1.8) (layer F.Fab) hide
+    (effects (font (size 1 1) (thickness 0.15)))
+  )
+  (pad 1 thru_hole circle (at -6.35 0) (size 2 2) (drill 1.2) (layers *.Cu *.Mask))
+  (pad 2 thru_hole circle (at -3.81 0) (size 2 2) (drill 1.2) (layers *.Cu *.Mask))
+  (pad 3 thru_hole circle (at -1.27 0) (size 2 2) (drill 1.2) (layers *.Cu *.Mask))
+  (pad 5 thru_hole circle (at 3.81 0) (size 2 2) (drill 1.2) (layers *.Cu *.Mask))
+  (pad 4 thru_hole circle (at 1.27 0) (size 2 2) (drill 1.2) (layers *.Cu *.Mask))
+  (pad 6 thru_hole circle (at 6.35 0) (size 2 2) (drill 1.2) (layers *.Cu *.Mask))
+)

@@ -1,0 +1,17 @@
+(module ViaStitch2.5mmSquare (layer F.Cu) (tedit 5AC29773)
+  (fp_text reference REF** (at -3.66 3.95) (layer F.SilkS) hide
+    (effects (font (size 1 1) (thickness 0.15)))
+  )
+  (fp_text value ViaStitch2.5mmSquare (at 0 2) (layer F.Fab) hide
+    (effects (font (size 1 1) (thickness 0.15)))
+  )
+  (pad "" thru_hole rect (at -0.83 -0.83) (size 0.84 0.84) (drill 0.35) (layers *.Cu))
+  (pad "" thru_hole rect (at 0 -0.83) (size 0.84 0.84) (drill 0.35) (layers *.Cu))
+  (pad "" thru_hole rect (at 0.83 -0.83) (size 0.84 0.84) (drill 0.35) (layers *.Cu))
+  (pad "" thru_hole rect (at -0.83 0) (size 0.84 0.84) (drill 0.35) (layers *.Cu))
+  (pad "" thru_hole rect (at 0 0) (size 0.84 0.84) (drill 0.35) (layers *.Cu))
+  (pad "" thru_hole rect (at 0.83 0) (size 0.84 0.84) (drill 0.35) (layers *.Cu))
+  (pad "" thru_hole rect (at -0.83 0.83) (size 0.84 0.84) (drill 0.35) (layers *.Cu))
+  (pad "" thru_hole rect (at 0 0.83) (size 0.84 0.84) (drill 0.35) (layers *.Cu))
+  (pad "" thru_hole rect (at 0.83 0.83) (size 0.84 0.84) (drill 0.35) (layers *.Cu))
+)

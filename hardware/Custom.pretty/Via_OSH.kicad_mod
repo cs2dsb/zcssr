@@ -1,0 +1,10 @@
+(module Via_OSH (layer F.Cu) (tedit 58A08C2E)
+  (fp_text reference REF** (at 0.05 0.25) (layer F.SilkS) hide
+    (effects (font (size 0.127 0.127) (thickness 0.01)))
+  )
+  (fp_text value Via_OSH (at 0.05 -0.2) (layer F.Fab) hide
+    (effects (font (size 0.127 0.127) (thickness 0.01)))
+  )
+  (pad 1 thru_hole circle (at 0 0) (size 0.6858 0.6858) (drill 0.3302) (layers *.Cu)
+    (zone_connect 2))
+)
