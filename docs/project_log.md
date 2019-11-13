@@ -66,3 +66,10 @@
     * Added USB port, mainly as an experiment to see if I can get it working and useful (USB DFU mode would be amazing but failing that, something similar to the TS-100 USB functionality would be ok)
     * Added a physical reset button. In theory, SWD doesn't need hardware reset and openocd should be able to connect to the core with just CLK, DIO and GND but in practice I've had boards fairly regularly get into a state where it can't connect reliably. Resetting by shorting NRST to GND resolves this and the board will work without reset until the ST-Link is unplugged or the boards power is cycled. I haven't been able to get to the bottom of it - the core is running, the gpio for SWD hasn't been reconfigured and I've tried every permutation of reset_config in openocd. There's some speculation on some forums that the ST-Link firmware is to blame as it's not a proper JTAG adapter and merely emulates some features; I could buy a proper JTAG adapter to rule this out but I want these boards to be programmable by anyone with a cheap adapter. This programming faff partially fed into the desire to add USB and explore USB bootloading. 
 
+## 13-Nov-2019
+
+* Changed AC-DC module from 3.3V to 5V to allow 5V SSR (or relay) output
+* Switched LDO to AP2112 as used on several Adafruit boards. It has better specs and doesn't require tantilum caps to be stable
+* 5V in allows using simple diodes to block backfeeding AC-DC or USB 5V inputs
+* Added transistors to control SSR and MISC outputs so they can be 5V rather than directly driven from MCU GPIO pins
+

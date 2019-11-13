@@ -170,6 +170,92 @@ impl PwmOutPins<TIM3> for LedSsrStatusChannels {
     type Channels = (Pwm<TIM3, C2>, Pwm<TIM3, C4>);
 }
 
+pub struct DisplayMessage {
+    characters: [AsciiChar; 50],
+    len: usize,
+    pos: usize,
+    tick: usize,
+    ticks_per_scroll: usize,
+    ticks_before_expand: usize,
+    single_char: AsciiChar,
+    single_char_dot: bool,
+    expanded: bool,
+    value: f32,
+}
+
+impl DisplayMessage {
+    const fn blank() -> AsciiChar {
+        AsciiChar::new(' ')
+    }
+
+    pub const fn default() -> Self {
+        Self {
+            characters: [Self::blank(); 50],
+            len: 0,
+            pos: 0,
+            tick: 0,
+            ticks_per_scroll: 1,
+            ticks_before_expand: 3,
+            single_char: Self::blank(),
+            single_char_dot: false,
+            expanded: false,
+            value: 0.,
+        }
+    }
+
+    pub fn tick<T, I>(&mut self, display: &mut T)
+    where 
+        T: AlphaNum4<I>
+    {
+        if self.expanded {
+            for i in 0..4 {
+                let p = self.pos + i;
+                let ch = if p < self.len { self.characters[p] } else { Self::blank() };
+                display.update_buffer_with_char(Index::from(i as u8), ch);
+            }
+        } else {
+            display.update_buffer_with_char(Index::One, self.single_char);
+            //TODO: return result
+            display.update_buffer_with_float(Index::Two, self.value, 0, 10).unwrap();
+        }
+
+        self.tick += 1;
+        if self.expanded && self.tick >= self.ticks_per_scroll {
+            self.tick = 0;
+            if self.pos >= self.len {
+                self.pos = 0;
+                self.expanded = false;
+            } else {
+                self.pos += 1;
+            }
+        } else if !self.expanded && self.tick >= self.ticks_before_expand {
+            self.tick = 0;
+            self.expanded = true;
+        }
+    }
+
+    pub fn set_text(&mut self, text: &[AsciiChar], char: AsciiChar, dot: bool) -> Result<(), ()> {
+        if text.len() > self.characters.len() {
+            return Err(())
+        }
+        for i in 0..text.len() {
+            self.characters[i] = text[i];
+        }
+        self.len = text.len();
+        self.single_char = char;
+        self.single_char_dot = dot;
+        Ok(())
+    }
+
+    pub fn set_value(&mut self, value: f32) {
+        if self.value != value {
+            self.value = value;
+            self.tick = 0;
+            self.expanded = false;
+        }
+    }
+}
+
 #[rtfm::app(device = stm32f1xx_hal::stm32)]
 const APP: () = {
     static mut EXTI_HANDLE: EXTI = ();
@@ -187,6 +273,7 @@ const APP: () = {
     //static mut SSR_EN_HANDLE: SSR_EN = ();
     //static mut NTC_TEST_OUT: PB1<Output<PushPull>> = ();
     //static mut TIM3_HANDLE: TIM3 = ();
+    static mut MESSAGE: DisplayMessage = ();
     #[init]
     fn init() -> init::LateResources {
         #[cfg(feature = "itm")]
@@ -416,6 +503,25 @@ const APP: () = {
             .start_count_down(1.hz())
             .release();*/
 
+        let mut display_message = DisplayMessage::default();
+        display_message.set_text(&[
+            AsciiChar::new('A'),
+            AsciiChar::new(' '),
+            AsciiChar::new('P'),
+            AsciiChar::new('u'),
+            AsciiChar::new('l'),
+            AsciiChar::new('s'),
+            AsciiChar::new('e'),
+            AsciiChar::new(' '),
+            AsciiChar::new('O'),
+            AsciiChar::new('n'),
+            AsciiChar::new(' '),
+            AsciiChar::new('T'),
+            AsciiChar::new('i'),
+            AsciiChar::new('m'),
+            AsciiChar::new('e'),
+        ], AsciiChar::new('A'), false).unwrap();
+
         info!("Init done");
 
         init::LateResources {
@@ -430,6 +536,7 @@ const APP: () = {
             //SSR_EN_HANDLE: ssr_en,
             //NTC_TEST_OUT: gpiob.pb1.into_push_pull_output(&mut gpiob.crl),
             //TIM3_HANDLE: tim3,
+            MESSAGE: display_message,
         }
     }
 
@@ -453,7 +560,7 @@ const APP: () = {
         info!("EXTI interrupt: {}. Pos: {}", *COUNT, pos);
     }
 
-    #[interrupt(resources = [TIM1_HANDLE, ZC_IN_HANDLE, CLOCKS, DISPLAY, NTC_DMA_BUFFER])]
+    #[interrupt(priority = 1, resources = [TIM1_HANDLE, ZC_IN_HANDLE, CLOCKS, DISPLAY, NTC_DMA_BUFFER, MESSAGE, ENC_QUAD_HANDLE])]
     fn TIM1_UP() {
         static mut COUNT: u16 = 0;
         *COUNT += 1;
@@ -485,8 +592,11 @@ const APP: () = {
 
         info!("TIM1_UP interrupt: {}. Freq: {}, duty: {}/{}, ntc_temp: {:?}", *COUNT, freq.0, duty.0, duty.1, temperature);
 
-        resources.DISPLAY.update_buffer_with_char(Index::One, AsciiChar::new('T'));
-        resources.DISPLAY.update_buffer_with_float(Index::Two, temperature, 2, 10).unwrap();
+        //resources.DISPLAY.update_buffer_with_char(Index::One, AsciiChar::new('T'));
+        //resources.DISPLAY.update_buffer_with_float(Index::Two, temperature, 2, 10).unwrap();
+
+        resources.MESSAGE.set_value(resources.ENC_QUAD_HANDLE.count() as f32);
+        resources.MESSAGE.tick(&mut *resources.DISPLAY);
         resources.DISPLAY.write_display_buffer().unwrap();
     }
 
