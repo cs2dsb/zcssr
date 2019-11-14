@@ -20,7 +20,7 @@
 
 ## 25-Sept-2019
 
-* Received TH_v0.1 boards ![Image of TH v0.1 fully assembled](th_0.1.jpg)
+* Received TH_v0.1 boards ![Image of TH v0.1 fully assembled](img/th_0.1.jpg)
 * Missing pullup on RST. Working as expected other than that
 * 14-Segment Adafruit display working nicely over I2C
 * Rotary encoder seems like a reasonable input device for the kind of config this needs (pulse1, delay1, pulse2, delay2)
@@ -38,7 +38,7 @@
 
 ## 22-Oct-2019
 
-* Received SMD_v0.1 boards from JLCPCB ![Image of v0.1 from jlc](smd_0.1_jlc.jpg)
+* Received SMD_v0.1 boards from JLCPCB ![Image of v0.1 from jlc](img/smd_0.1_jlc.jpg)
 * Identified issues:
     * Q1 Base and Collector are switched. Resolved with some solder bodging
     * Varistor/Mov leads are too thick for holes. Resolved with some solder bodging
