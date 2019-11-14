@@ -80,7 +80,7 @@ use stm32f1xx_hal::{
     },
     pwm_input::{
         Configuration as PwmInputConfig,
-        ReadMode,
+        //ReadMode,
         PwmInput,
     },
     qei::Qei,
@@ -170,8 +170,38 @@ impl PwmOutPins<TIM3> for LedSsrStatusChannels {
     type Channels = (Pwm<TIM3, C2>, Pwm<TIM3, C4>);
 }
 
+const MAX_SETTING_CHARS: usize = 32;
+
+#[derive(Debug)]
+pub struct Setting {
+    pub characters: [AsciiChar; MAX_SETTING_CHARS],
+    pub len: usize,
+    pub single_char: AsciiChar,
+    pub single_char_dot: bool,
+    pub value: u16,
+}
+
+impl Setting {
+    pub fn new(string: &str, single_char: char, single_char_dot: bool, value: u16) -> Self {
+        assert!(string.len() <= MAX_SETTING_CHARS);
+        let mut characters = [AsciiChar::new(' '); MAX_SETTING_CHARS];
+        for (i, c) in string.chars().enumerate() {
+            characters[i] = AsciiChar::from_ascii(c).unwrap();
+        }
+        let single_char = AsciiChar::from_ascii(single_char).unwrap();
+        Self {
+            characters,
+            len: string.len(),
+            single_char,
+            single_char_dot,
+            value,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct DisplayMessage {
-    characters: [AsciiChar; 50],
+    characters: [AsciiChar; MAX_SETTING_CHARS],
     len: usize,
     pos: usize,
     tick: usize,
@@ -190,12 +220,12 @@ impl DisplayMessage {
 
     pub const fn default() -> Self {
         Self {
-            characters: [Self::blank(); 50],
+            characters: [Self::blank(); MAX_SETTING_CHARS],
             len: 0,
             pos: 0,
             tick: 0,
-            ticks_per_scroll: 1,
-            ticks_before_expand: 3,
+            ticks_per_scroll: 2,
+            ticks_before_expand: 15,
             single_char: Self::blank(),
             single_char_dot: false,
             expanded: false,
@@ -215,6 +245,9 @@ impl DisplayMessage {
             }
         } else {
             display.update_buffer_with_char(Index::One, self.single_char);
+            if self.single_char_dot {
+                display.update_buffer_with_dot(Index::One, true);
+            }
             //TODO: return result
             display.update_buffer_with_float(Index::Two, self.value, 0, 10).unwrap();
         }
@@ -234,17 +267,12 @@ impl DisplayMessage {
         }
     }
 
-    pub fn set_text(&mut self, text: &[AsciiChar], char: AsciiChar, dot: bool) -> Result<(), ()> {
-        if text.len() > self.characters.len() {
-            return Err(())
-        }
-        for i in 0..text.len() {
-            self.characters[i] = text[i];
-        }
-        self.len = text.len();
+    pub fn set_text(&mut self, text: [AsciiChar; MAX_SETTING_CHARS], len: usize, char: AsciiChar, dot: bool) {
+        assert!(len < MAX_SETTING_CHARS);
+        self.characters = text;
+        self.len = len;
         self.single_char = char;
         self.single_char_dot = dot;
-        Ok(())
     }
 
     pub fn set_value(&mut self, value: f32) {
@@ -253,6 +281,116 @@ impl DisplayMessage {
             self.tick = 0;
             self.expanded = false;
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum WeldSetting {
+    PulseAOn,
+    PulseADelay,
+    PulseBOn,
+    PulseBDelay,
+}
+
+impl Default for WeldSetting {
+    fn default() -> Self {
+        WeldSetting::PulseAOn
+    }
+}
+
+impl WeldSetting {
+    pub fn next(self) -> Self {
+        match self {
+            WeldSetting::PulseAOn => WeldSetting::PulseADelay,
+            WeldSetting::PulseADelay => WeldSetting::PulseBOn,
+            WeldSetting::PulseBOn => WeldSetting::PulseBDelay,
+            WeldSetting::PulseBDelay => WeldSetting::PulseAOn,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct WeldSettings {
+    pulse_a_on: Setting,
+    pulse_a_delay: Setting,
+    pulse_b_on: Setting,
+    pulse_b_delay: Setting,
+    current_setting: WeldSetting,
+    display_message: DisplayMessage,
+}
+
+impl WeldSettings {
+    pub fn new() -> Self {
+        let mut self_ = Self {
+            pulse_a_on: Setting::new("A-PULSE ON TIME", 'A', false, 10),
+            pulse_a_delay: Setting::new("A DELAY TIME", 'A', true, 20),
+            pulse_b_on: Setting::new("B-PULSE ON TIME", 'B', false, 30),
+            pulse_b_delay: Setting::new("B DELAY TIME", 'B', true, 40),
+            current_setting: WeldSetting::default(),
+            display_message: DisplayMessage::default(),
+        };
+        self_.update_message();
+        self_
+    }
+
+    fn current_setting(&self) -> &Setting {
+        match self.current_setting {
+            WeldSetting::PulseAOn => &self.pulse_a_on,
+            WeldSetting::PulseADelay => &self.pulse_a_delay,
+            WeldSetting::PulseBOn => &self.pulse_b_on,
+            WeldSetting::PulseBDelay => &self.pulse_b_delay,
+        }
+    }
+
+    fn current_setting_mut(&mut self) -> &mut Setting {
+        match self.current_setting {
+            WeldSetting::PulseAOn => &mut self.pulse_a_on,
+            WeldSetting::PulseADelay => &mut self.pulse_a_delay,
+            WeldSetting::PulseBOn => &mut self.pulse_b_on,
+            WeldSetting::PulseBDelay => &mut self.pulse_b_delay,
+        }
+    }
+
+    fn update_message(&mut self) {
+        let (text, len, sc, dot, value) = {
+            let cs = self.current_setting();
+            (cs.characters.clone(), cs.len, cs.single_char, cs.single_char_dot, cs.value)
+        };
+        self.display_message.set_text(text, len, sc, dot);
+        self.display_message.set_value(value as f32);
+    }
+
+    pub fn set_value(&mut self, value: u16) {
+        let mut cs = self.current_setting_mut();
+        if cs.value != value {
+            cs.value = value;
+            let valuef = value as f32;
+            self.display_message.set_value(valuef);
+        }
+    }
+
+    pub fn tick<T, I>(&mut self, display: &mut T)
+    where 
+        T: AlphaNum4<I>
+    {
+        self.display_message.tick(display);
+    }
+
+    pub fn next(&mut self) {
+        self.current_setting = self.current_setting.next();
+        self.update_message();
+    }
+
+    pub fn value(&self) -> u16 {
+        self.current_setting().value
+    }
+
+    pub fn update_from_quad(&mut self, quad: &Qei<TIM4,(EncA, EncB)>) {
+        self.set_value(quad.count() % 99 * 10);
+    }
+
+    pub fn update_quad_from_value(&self, quad: &mut Qei<TIM4,(EncA, EncB)>) {
+        update_quad_count(quad, self.value() / 10);
     }
 }
 
@@ -273,7 +411,7 @@ const APP: () = {
     //static mut SSR_EN_HANDLE: SSR_EN = ();
     //static mut NTC_TEST_OUT: PB1<Output<PushPull>> = ();
     //static mut TIM3_HANDLE: TIM3 = ();
-    static mut MESSAGE: DisplayMessage = ();
+    static mut WELD_SETTINGS: WeldSettings = ();
     #[init]
     fn init() -> init::LateResources {
         #[cfg(feature = "itm")]
@@ -380,7 +518,7 @@ const APP: () = {
         // - NTC adc
 
         // Rotary encoder quadrature input
-        let quad_input = Timer::tim4(device.TIM4, &clocks, &mut rcc.apb1)
+        let mut quad_input = Timer::tim4(device.TIM4, &clocks, &mut rcc.apb1)
             .qei((
                 gpiob.pb6.into_floating_input(&mut gpiob.crl), //Encoder A input
                 gpiob.pb7.into_floating_input(&mut gpiob.crl), //Encoder B input
@@ -492,7 +630,7 @@ const APP: () = {
         // - rot enc button
         
         let mut tim1 = Timer::tim1(device.TIM1, &clocks, &mut rcc.apb2)
-            .start_count_down(1.hz());
+            .start_count_down(3.hz());
         tim1.listen(Event::Update);
 
         let mut tim8 = Timer::tim8(device.TIM8, &clocks, &mut rcc.apb2)
@@ -503,24 +641,11 @@ const APP: () = {
             .start_count_down(1.hz())
             .release();*/
 
-        let mut display_message = DisplayMessage::default();
-        display_message.set_text(&[
-            AsciiChar::new('A'),
-            AsciiChar::new(' '),
-            AsciiChar::new('P'),
-            AsciiChar::new('u'),
-            AsciiChar::new('l'),
-            AsciiChar::new('s'),
-            AsciiChar::new('e'),
-            AsciiChar::new(' '),
-            AsciiChar::new('O'),
-            AsciiChar::new('n'),
-            AsciiChar::new(' '),
-            AsciiChar::new('T'),
-            AsciiChar::new('i'),
-            AsciiChar::new('m'),
-            AsciiChar::new('e'),
-        ], AsciiChar::new('A'), false).unwrap();
+        let weld_settings = WeldSettings::new();
+        //Update the quad counter to match the current setting
+        weld_settings.update_quad_from_value(&mut quad_input);
+
+        info!("WELD_SETTINGS: {:#?}", weld_settings);
 
         info!("Init done");
 
@@ -536,7 +661,7 @@ const APP: () = {
             //SSR_EN_HANDLE: ssr_en,
             //NTC_TEST_OUT: gpiob.pb1.into_push_pull_output(&mut gpiob.crl),
             //TIM3_HANDLE: tim3,
-            MESSAGE: display_message,
+            WELD_SETTINGS: weld_settings,
         }
     }
 
@@ -548,26 +673,32 @@ const APP: () = {
         }
     }
 
-    #[interrupt(resources = [EXTI_HANDLE, ENC_QUAD_HANDLE])]
+    #[interrupt(resources = [EXTI_HANDLE, ENC_QUAD_HANDLE, WELD_SETTINGS])]
     fn EXTI9_5() {
-        static mut COUNT: u16 = 0;
-        *COUNT += 1;
-        
         //Clear interrupt
         resources.EXTI_HANDLE.pr.write(|w| w.pr5().set_bit());
 
-        let pos = resources.ENC_QUAD_HANDLE.count();
-        info!("EXTI interrupt: {}. Pos: {}", *COUNT, pos);
+        resources.WELD_SETTINGS.next();
+        resources.WELD_SETTINGS.update_quad_from_value(&mut resources.ENC_QUAD_HANDLE);
     }
 
-    #[interrupt(priority = 1, resources = [TIM1_HANDLE, ZC_IN_HANDLE, CLOCKS, DISPLAY, NTC_DMA_BUFFER, MESSAGE, ENC_QUAD_HANDLE])]
+    #[interrupt(resources = [
+        TIM1_HANDLE, 
+        ZC_IN_HANDLE, 
+        CLOCKS, 
+        DISPLAY, 
+        NTC_DMA_BUFFER, 
+        ENC_QUAD_HANDLE,
+        WELD_SETTINGS,
+    ])]
     fn TIM1_UP() {
-        static mut COUNT: u16 = 0;
+        static mut COUNT: u32 = 0;
         *COUNT += 1;
 
         //Clear interrupt
         resources.TIM1_HANDLE.clear_update_interrupt_flag();
 
+        /*
         let freq = resources.ZC_IN_HANDLE
             .read_frequency(ReadMode::Instant, &resources.CLOCKS)
             .unwrap_or(0.hz());
@@ -575,28 +706,25 @@ const APP: () = {
         let duty = resources.ZC_IN_HANDLE
             .read_duty(ReadMode::Instant)
             .unwrap_or((0, 0));
+        */
 
-        unsafe {
-            &(*DMA1::ptr())
-                .ifcr.write(|w|
-                    w.chtif1().set_bit()
-                );
+        if *COUNT % 6 == 0 {
+            unsafe {
+                &(*DMA1::ptr())
+                    .ifcr.write(|w|
+                        w.chtif1().set_bit()
+                    );
+            }
+            let ntc_sample = resources.NTC_DMA_BUFFER
+                .peek(|half, _| {
+                    half[0]
+                }).unwrap_or(0);
+            let temperature = ntc_sample_to_degrees(ntc_sample);
+            info!("ntc_temp: {:?}", temperature);
         }
 
-        let ntc_sample = resources.NTC_DMA_BUFFER
-            .peek(|half, _| {
-                half[0]
-            }).unwrap_or(0);
-
-        let temperature = ntc_sample_to_degrees(ntc_sample);
-
-        info!("TIM1_UP interrupt: {}. Freq: {}, duty: {}/{}, ntc_temp: {:?}", *COUNT, freq.0, duty.0, duty.1, temperature);
-
-        //resources.DISPLAY.update_buffer_with_char(Index::One, AsciiChar::new('T'));
-        //resources.DISPLAY.update_buffer_with_float(Index::Two, temperature, 2, 10).unwrap();
-
-        resources.MESSAGE.set_value(resources.ENC_QUAD_HANDLE.count() as f32);
-        resources.MESSAGE.tick(&mut *resources.DISPLAY);
+        resources.WELD_SETTINGS.update_from_quad(&resources.ENC_QUAD_HANDLE);
+        resources.WELD_SETTINGS.tick(&mut *resources.DISPLAY);
         resources.DISPLAY.write_display_buffer().unwrap();
     }
 
@@ -607,21 +735,12 @@ const APP: () = {
             &(*TIM8::ptr()).sr.modify(|_, w| w.uif().clear_bit());
         }
         unsafe {
+            // This is for one pulse mode testing, associated LED is blinking briefly once per second
             let tim = &(*TIM3::ptr());
             tim.cr1.modify(|_, w| w
                 .cen().set_bit()
             );
         }
-    }
-
-    #[interrupt]
-    fn TIM8_CC() {
-        /*
-        //info!("TIM8_CC interrupt");
-        unsafe {
-            &(*TIM8::ptr()).sr.modify(|_, w| w.cc3if().clear_bit());
-        }
-        */
     }
 
     #[interrupt(resources = [OUTPUT_CONFIG])]
@@ -657,6 +776,18 @@ const APP: () = {
     }
 };
 
+/// Disables the timer, updates the count register, re-enables the timer.
+/// Doesn't actually use the parameter because this functionality isn't available on hal interface
+fn update_quad_count(_quad: &mut Qei<TIM4,(EncA, EncB)>, count: u16) {
+    unsafe {
+        let tim = &(*TIM4::ptr());
+        tim.cr1.modify(|_, w| w.cen().clear_bit());
+        tim.cnt.write(|w| w.cnt().bits(count));
+        tim.cr1.modify(|_, w| w.cen().set_bit());
+    }
+}
+
+#[allow(dead_code)]
 fn ntc_sample_to_degrees(sample: u16) -> f32 {
     let adc_sample = sample as f32;
     let adc_v = VCC_F * adc_sample / ADC_MAX_F;
