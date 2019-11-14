@@ -50,12 +50,12 @@ These parts need to be ordered (check BOM in case this list gets missed from an 
 * C89122 - Phoenix Contact 1751248 (Thermocouple input)
 * C206887 - Littlefuse fuse holder
 * C187509 - Littlefuse fuse cover
-* C343641 - Header pins (note these need to be cut down, they don't stock a 28 position one currently)
+* C56496 - Header pins
 * C136145 - NTC thermistor
 * C140500 - 500mA slow blow fuse
-* C209904 - 3.3V AC-DC power module
+* C209903 - 5V AC-DC power module
 * C233184 - Varistor
-* C361165 - ALPS rotary encoder (This one is detentless and doesn't have a threaded mounting column. There are a dozen different styles if you search for ALPS rotary encoders)
+* C361165 - ALPS rotary encoder (This one is detentless and doesn't have a threaded mounting column. There are a dozen different styles if you search for ALPS "coded rotary switches". Most of EC11 range is suitable but check for "With" in "Push-on switch" column in datasheet. EC12D have push buttons and are all suitable but are only available with detents and in relatively low pulse/rev)
 
 ## Other Parts
 * [Enclosure](https://www.banggood.com/100x68x50mm-IP65-Waterproof-Electronic-Project-Enclosure-Case-DIY-Enclosure-Instrument-Case-p-1260023.html?rmmds=myorder&cur_warehouse=CN) - the pcb is designed to fit in this box and there's **probably** enough space to fit the display, rotary encoder, LEDs and maybe even the SSR inside too. Check the [docs folder](..) for assembly details once the next version of the hardware has been tested
