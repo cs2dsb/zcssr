@@ -73,3 +73,6 @@
 * 5V in allows using simple diodes to block backfeeding AC-DC or USB 5V inputs
 * Added transistors to control SSR and MISC outputs so they can be 5V rather than directly driven from MCU GPIO pins
 
+## 15-Nov-2019
+
+* Added tiny 1x1mm rgb LED to spare pins near the existing LED. Mainly want to see how bright this tiny LED is at ~5ma
