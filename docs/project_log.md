@@ -76,3 +76,7 @@
 ## 15-Nov-2019
 
 * Added tiny 1x1mm rgb LED to spare pins near the existing LED. Mainly want to see how bright this tiny LED is at ~5ma
+
+## 16-Nov-2019
+
+* Placed an order for the next version of the PCB
