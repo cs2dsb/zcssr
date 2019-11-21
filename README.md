@@ -56,6 +56,21 @@ Not a complete list. Will add to it as features get implemented
 
 ## Documentation
 
+### Getting started
+
+* Clone the repo
+* Run `./bootstrap` script which will:
+  * Initialize git submodules
+  * Run `firmware/bootstrap` which will:
+    * Install or update rustup
+    * Install required rust embedded toolchains
+    * Install cargo-binutils
+    * Install cargo-watch
+    * Install llvm-tools-preview
+    * Run a cargo check, build and doc of the firmware (will take quite a while the first time)
+
+### More info
+
 Check [the docs folder](docs) for information on setting up the dev environment and various info on making the hardware.
 
 ## Disclaimer

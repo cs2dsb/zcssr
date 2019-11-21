@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -e
+
+repo_dir=$( cd $(dirname ${BASH_SOURCE[0]}); pwd )
+
+cd ${repo_dir}
+
+echo "Initialising git sub modules"
+git submodule update --init --recursive
+echo ""
+
+cd ${repo_dir}/firmware
+./bootstrap
