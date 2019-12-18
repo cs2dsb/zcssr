@@ -11,5 +11,6 @@ find . -type f -name '*pos.csv' -exec sed -i '/"Q3",/ s/,90.000000,top/,270.0000
 find . -type f -name '*pos.csv' -exec sed -i '/"U3",/ s/,270.000000,top/,90.000000,top/;' {} \;
 find . -type f -name '*pos.csv' -exec sed -i '/"D8",/ s/,270.000000,top/,90.000000,top/;' {} \;
 find . -type f -name '*pos.csv' -exec sed -i '/"U2",/ s/,0.000000,top/,270.000000,top/;' {} \;
+find . -type f -name '*pos.csv' -exec sed -i '/"D13",/ s/,90.000000,top/,270.000000,top/;' {} \;
 
 zip print.zip zero_*
