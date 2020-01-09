@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -e
 
+# Check for pre-requeisites
+gcc --version && openocd --version && gdb-multiarch --version || (echo "Install gcc, gdb and openocd. Try 'apt install -y gcc openocd gdb-multiarch' if you are on using ubuntu" && exit 1)
+
 # Download and install rustup if it's missing
 rustup -V || curl https://sh.rustup.rs -sSf | sh
 # Ensure we have the latest rustup

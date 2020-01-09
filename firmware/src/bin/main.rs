@@ -19,12 +19,14 @@ use cortex_m::{
 //For ln
 use libm::F32Ext;
 
-#[cfg(feature = "itm")] use cortex_m::peripheral::{
-    ITM,
+#[cfg(feature = "itm")] 
+use {
+    cortex_m::peripheral::ITM,
+    itm_logger::*,
 };
-//#[cfg(feature = "itm")] use itm_packets::*;
-#[cfg(feature = "itm")] use itm_logger::*;
-#[cfg(not(feature = "itm"))] use itm_logger::{ info };
+
+#[cfg(not(feature = "itm"))] 
+use itm_logger::{ info, error, warn };
 
 use zcssr::board::*;
 
@@ -34,10 +36,12 @@ use adafruit_alphanum4::{
     AsciiChar,
 };
 
-/*
+use max31855::{
+    Max31855,
+    Unit,
+};
+
 use embedded_hal::digital::v2::OutputPin;
-use embedded_hal::digital::v2::InputPin;
-*/
 
 use ht16k33::{
     HT16K33,
@@ -60,6 +64,7 @@ use stm32f1xx_hal::{
         TIM8,
         DMA1,
         I2C2,
+        SPI2,
     },
     gpio::{
         PushPull,
@@ -70,7 +75,6 @@ use stm32f1xx_hal::{
         },
     },    
     timer::*,
-    delay::Delay,
     time::Hertz,
     pwm::{
         C2,
@@ -80,13 +84,14 @@ use stm32f1xx_hal::{
     },
     pwm_input::{
         Configuration as PwmInputConfig,
-        //ReadMode,
+        ReadMode,
         PwmInput,
     },
     qei::Qei,
     adc::{
         Adc,
         AdcPayload,
+        Continuous,
     },
     dma::{
         RxDma,
@@ -100,8 +105,16 @@ use stm32f1xx_hal::{
         Mode as I2cMode,
         blocking_i2c,
         BlockingI2c,
-    },
+    },    
+    spi::Spi,
 };
+
+// If true, panic on failure to configure HT16K33, else just log it
+const HT16K33_MISSING_FATAL: bool = false;
+
+// If true, wait (possible forever) for first zero crossing
+const WAIT_FOR_ZC_INIT: bool = false;
+
 
 //Represents both the welding config and the current welding state
 //One copy is accessible to UI for config
@@ -406,12 +419,16 @@ const APP: () = {
     static mut OUTPUT_CONFIG: OutputConfig = OutputConfig::default();
     /// Used for actual output control by ZC interrupt only
     static mut OUTPUT_STATE: OutputConfig = OutputConfig::default();
-    static mut NTC_DMA_BUFFER: CircBuffer<[u16; 8], RxDma<AdcPayload<Ntc>, DmaC1>> = ();
+    static mut NTC_DMA_BUFFER: CircBuffer<[u16; 8], RxDma<AdcPayload<Ntc, Continuous>, DmaC1>> = ();
     static mut DISPLAY: HT16K33<BlockingI2c<I2C2, (DispScl, DispSda)>> = ();
     //static mut SSR_EN_HANDLE: SSR_EN = ();
     //static mut NTC_TEST_OUT: PB1<Output<PushPull>> = ();
     //static mut TIM3_HANDLE: TIM3 = ();
     static mut WELD_SETTINGS: WeldSettings = ();
+    static mut MAX31855K: Spi<SPI2, (KThermoSck, KThermoMiso, KThermoMosiNotConnected)> = ();
+    static mut MAX31855K_CS: KThermoNss = ();
+    static mut USR_LED: LedUsr = ();
+    
     #[init]
     fn init() -> init::LateResources {
         #[cfg(feature = "itm")]
@@ -422,14 +439,13 @@ const APP: () = {
             update_tpiu_baudrate(hsi.0, baud.0).expect("Failed to reset TPIU baudrate");
             logger_init();
 
-            /*
             unsafe {
+                //TODO: move to itm_logger crate
                 (*ITM::ptr()).tcr.modify(|w|
                     //Enable local timestamps
                     w | (1 << 1)
                 );
             }
-            */
 
             info!("ITM reset");
         }
@@ -442,11 +458,9 @@ const APP: () = {
         let mut rcc = device
             .RCC
             .constrain();
-
         let mut flash = device
             .FLASH
             .constrain();
-
         let clocks = rcc.cfgr
             .use_hse(HSE)
             .sysclk(SYSCLK_FREQ)
@@ -455,8 +469,10 @@ const APP: () = {
             .adcclk(ADC_FREQ)
             .freeze(&mut flash.acr);
 
+
         #[cfg(feature = "itm")]
         {
+            //Update the baud rate for the new core clock
             let sysclk: Hertz = clocks.sysclk().into();
             let baud: Hertz = ITM_BAUDRATE.into();
             update_tpiu_baudrate(sysclk.0, baud.0).expect("Failed to reset TPIU baudrate");     
@@ -467,7 +483,6 @@ const APP: () = {
         //BlockingI2c relies upon DWT being running
         core.DWT.enable_cycle_counter();
 
-        let _delay = Delay::new(core.SYST, clocks);
         let mut afio = device.AFIO.constrain(&mut rcc.apb2);
         let mut dbg = device.DBGMCU;
         let mut gpioa = device.GPIOA.split(&mut rcc.apb2);
@@ -476,54 +491,92 @@ const APP: () = {
         let adc1 = Adc::adc1(device.ADC1, &mut rcc.apb2, clocks);
         let dma1 = device.DMA1.split(&mut rcc.ahb);
 
-        // I2C disp
-        let freq: Hertz = 20.khz().into();
-
+        // Initialize the I2C display
+        let scl_pin: DispScl = gpiob.pb10.into_alternate_open_drain(&mut gpiob.crh);
+        let sda_pin: DispSda = gpiob.pb11.into_alternate_open_drain(&mut gpiob.crh);
         let i2c2 = blocking_i2c(
             I2c::i2c2(
                 device.I2C2, 
-                (
-                    gpiob.pb10.into_alternate_open_drain(&mut gpiob.crh),
-                    gpiob.pb11.into_alternate_open_drain(&mut gpiob.crh),
-                ),
+                (scl_pin, sda_pin),
                 I2cMode::Standard {
-                    frequency: freq.0,
+                    frequency: DISP_BAUDRATE.into(),
                 },
                 clocks,
                 &mut rcc.apb1,
             ),
             clocks,
+            //TODO: remove magic numbers given to blocking_i2c
             500,
             2,
             500,
             500,
         );
-
-        const DISP_I2C_ADDR: u8 = 112;
-
-        // I2C display
         let mut ht16k33 = HT16K33::new(i2c2, DISP_I2C_ADDR);
-        ht16k33.initialize().expect("Failed to initialize ht16k33");
-        ht16k33.set_display(Display::ON).unwrap();
-        ht16k33.write_display_buffer().unwrap();
-        // -I2C display
+        if ht16k33.initialize().is_err() ||
+           ht16k33.set_display(Display::ON).is_err() ||
+           ht16k33.write_display_buffer().is_err()
+        {
+            if HT16K33_MISSING_FATAL {
+                panic!("Failed to initialize ht16k33");
+            } else {
+                error!("Failed to initialize ht16k33");
+            }
+        }
 
-        // NTC adc
+
+        // User led (red)
+        let mut usr_led = gpioa.pa7.into_push_pull_output(&mut gpioa.crl);
+        usr_led.set_high().unwrap();
+
+        
+        // Initialize the spi thermocouple chip
+        let sck_pin: KThermoSck = gpiob.pb13.into_alternate_push_pull(&mut gpiob.crh);
+        let miso_pin: KThermoMiso = gpiob.pb14.into_floating_input(&mut gpiob.crh);
+        let mosi_pin: KThermoMosiNotConnected = gpiob.pb15.into_alternate_push_pull(&mut gpiob.crh);
+        let mut max31855_cs_pin: KThermoNss = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
+        max31855_cs_pin.set_high().unwrap();
+        let max31855 = Spi::spi2(
+            device.SPI2,
+            (sck_pin, miso_pin, mosi_pin),
+            MAX31855_SPI_MODE,
+            MAX31855_BAUDRATE,
+            clocks,
+            &mut rcc.apb1
+        );
+
+
+        // Configure the ADC and DMA for reading the NTC thermistor
+        let ntc_pin: Ntc = gpiob.pb1.into_analog(&mut gpiob.crl);
         let ntc_dma = adc1.with_dma(
-            gpiob.pb1.into_analog(&mut gpiob.crl),
+            ntc_pin,
             dma1.1,
         );
         let ntc_buffer = singleton!(: [[u16; 8]; 2] = [[0; 8]; 2]).unwrap();
         let ntc_circ_buffer = ntc_dma.circ_read(ntc_buffer);
-        // - NTC adc
 
-        // Rotary encoder quadrature input
+
+        // Configure timer for rotary encoder quadrature input
+        let enc_a_pin: EncA = gpiob.pb6.into_floating_input(&mut gpiob.crl);
+        let enc_b_pin: EncB = gpiob.pb7.into_floating_input(&mut gpiob.crl);
         let mut quad_input = Timer::tim4(device.TIM4, &clocks, &mut rcc.apb1)
-            .qei((
-                gpiob.pb6.into_floating_input(&mut gpiob.crl), //Encoder A input
-                gpiob.pb7.into_floating_input(&mut gpiob.crl), //Encoder B input
-            ), &mut afio.mapr);
-        // - quad
+            .qei(
+                (enc_a_pin, enc_b_pin),
+                &mut afio.mapr
+            );
+
+
+        // Configure EXTI interrupt for rotary encoder button
+        let _rot_enc_btn: EncBtn = gpiob.pb5.into_floating_input(&mut gpiob.crl);
+        let exti = device.EXTI;
+        unsafe {
+            //Set EXTI5 to port B
+            afio.exticr2.exticr2().modify(|_, w| w.exti5().bits(0b0001));
+            //Enable falling edge trigger
+            exti.ftsr.modify(|_, w| w.tr5().set_bit());        
+            //Enable exti 5 interrupt
+            exti.imr.modify(|_, w| w.mr5().set_bit());
+        }
+
 
         // Debug LED       
         /*
@@ -591,12 +644,11 @@ const APP: () = {
         // - ssr en
 
         // ZC input
+        let zc_rising_pin: ZcRising = gpioa.pa0.into_floating_input(&mut gpioa.crl);
+        let zc_falling_pin: ZcFalling = gpioa.pa1.into_floating_input(&mut gpioa.crl);
         let zc_in = Timer::tim2(device.TIM2, &clocks, &mut rcc.apb1)
             .pwm_input(
-                (
-                    gpioa.pa0.into_floating_input(&mut gpioa.crl), //Rising
-                    gpioa.pa1.into_floating_input(&mut gpioa.crl), //Falling
-                ), 
+                (zc_rising_pin, zc_falling_pin),
                 &mut afio.mapr, 
                 &mut dbg, 
                 PwmInputConfig::Frequency(300.hz()),
@@ -612,22 +664,10 @@ const APP: () = {
             //info!("{:b}", tim.dier.read().bits());
         }
 
-        info!("Waiting for ZC timer to stabilize");
-        //while zc_in.read_frequency(ReadMode::Instant, &clocks).is_err() {}
-        // -zc input
-
-        // Rotary encoder button input
-        let _rot_enc_btn: EncBtn = gpiob.pb5.into_floating_input(&mut gpiob.crl);
-        let exti = device.EXTI;
-        unsafe {
-            //Set EXTI5 to port B
-            afio.exticr2.exticr2().modify(|_, w| w.exti5().bits(0b0001));
-            //Enable falling edge trigger
-            exti.ftsr.modify(|_, w| w.tr5().set_bit());        
-            //Enable exti 5 interrupt
-            exti.imr.modify(|_, w| w.mr5().set_bit());
+        if WAIT_FOR_ZC_INIT {
+            info!("Waiting for ZC timer to stabilize");
+            while zc_in.read_frequency(ReadMode::Instant, &clocks).is_err() {}
         }
-        // - rot enc button
         
         let mut tim1 = Timer::tim1(device.TIM1, &clocks, &mut rcc.apb2)
             .start_count_down(3.hz());
@@ -662,6 +702,9 @@ const APP: () = {
             //NTC_TEST_OUT: gpiob.pb1.into_push_pull_output(&mut gpiob.crl),
             //TIM3_HANDLE: tim3,
             WELD_SETTINGS: weld_settings,
+            MAX31855K: max31855,
+            MAX31855K_CS: max31855_cs_pin,
+            USR_LED: usr_led,
         }
     }
 
@@ -690,6 +733,9 @@ const APP: () = {
         NTC_DMA_BUFFER, 
         ENC_QUAD_HANDLE,
         WELD_SETTINGS,
+        USR_LED,
+        MAX31855K,
+        MAX31855K_CS,
     ])]
     fn TIM1_UP() {
         static mut COUNT: u32 = 0;
@@ -708,24 +754,46 @@ const APP: () = {
             .unwrap_or((0, 0));
         */
 
-        if *COUNT % 6 == 0 {
-            unsafe {
-                &(*DMA1::ptr())
-                    .ifcr.write(|w|
-                        w.chtif1().set_bit()
-                    );
-            }
-            let ntc_sample = resources.NTC_DMA_BUFFER
-                .peek(|half, _| {
-                    half[0]
-                }).unwrap_or(0);
-            let temperature = ntc_sample_to_degrees(ntc_sample);
-            info!("ntc_temp: {:?}", temperature);
+        if *COUNT % 2 == 0 {
+            resources.USR_LED.set_low().unwrap();
+
+            let ntc_temperature = {
+                unsafe {
+                    &(*DMA1::ptr())
+                        .ifcr.write(|w|
+                            w.chtif1().set_bit()
+                        );
+                }
+                let ntc_sample = resources.NTC_DMA_BUFFER
+                    .peek(|half, _| {
+                        half[0]
+                    }).unwrap_or(0);
+                
+                ntc_sample_to_degrees(ntc_sample)
+            };
+
+            let thermocouple_temperature = {
+                match resources.MAX31855K.read_thermocouple(resources.MAX31855K_CS, Unit::Celsius) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warn!("Error reading thermocouple: {:?}", e);
+                        0.
+                    },
+                }
+            };
+
+            info!("ntc_temp: {}, thermocouple_temperature: {}", ntc_temperature, thermocouple_temperature);
+
+            resources.USR_LED.set_high().unwrap();
         }
 
         resources.WELD_SETTINGS.update_from_quad(&resources.ENC_QUAD_HANDLE);
         resources.WELD_SETTINGS.tick(&mut *resources.DISPLAY);
-        resources.DISPLAY.write_display_buffer().unwrap();
+        if let Err(e) = resources.DISPLAY.write_display_buffer() {
+            if HT16K33_MISSING_FATAL {
+                panic!("HT16K33 error: {:?}", e);
+            }
+        }
     }
 
     #[interrupt]

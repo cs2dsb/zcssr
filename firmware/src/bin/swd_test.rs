@@ -55,9 +55,11 @@ const APP: () = {
     }
 };
 
+
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     interrupt::disable();
+
 
     #[cfg(feature = "itm")]
     {

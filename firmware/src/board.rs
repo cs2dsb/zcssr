@@ -13,7 +13,8 @@ use stm32f1xx_hal::{
     },    
     time::{
         *,
-    },
+    },    
+    spi::{Mode, Polarity, Phase},
 };
 
 /*
@@ -38,6 +39,20 @@ pub const ADC_FREQ: MegaHertz = MegaHertz(2);
 /// Baud rate used for ITM communication
 pub const ITM_BAUDRATE: MegaHertz = MegaHertz(2);
 
+/// Baud rate for I2C display
+pub const DISP_BAUDRATE: KiloHertz = KiloHertz(20);
+/// Address for I2C display
+pub const DISP_I2C_ADDR: u8 = 112;
+
+/// Baud rate for MAX31855 SPI
+//pub const MAX31855_BAUDRATE: KiloHertz = KiloHertz(100);
+pub const MAX31855_BAUDRATE: MegaHertz = MegaHertz(4);
+/// SPI mode for MAX31855
+pub const MAX31855_SPI_MODE: Mode = Mode {
+    polarity: Polarity::IdleLow,
+    phase: Phase::CaptureOnFirstTransition
+};
+
 /// Assumed VCC voltage
 pub const VCC_F: f32 = 3.3;
 /// Maximum value ADC can return
@@ -55,7 +70,7 @@ pub const CELCIUS_KELVIN_OFFSET: f32 = 273.15;
 
 /// Debug LED on PCB near MCU
 /// TIM3_CH2
-pub type LedUsr        = PA7<Alternate<PushPull>>;
+pub type LedUsr        = PA7<Output<PushPull>>;
 
 /// Status LED to indicate ready, error, etc.
 /// TIM8_CH3
@@ -77,7 +92,7 @@ pub type EncA          = PB6<Input<Floating>>;
 /// TIM4_CH2
 pub type EncB          = PB7<Input<Floating>>;
 
-/// NTC thermister input. Half way point of resistor divider VCC-10k-[NTC]-GND
+/// NTC thermister input. Half way point of resistor divider VCC-10k-NTC-GND
 /// ADC1_CH9
 pub type Ntc            = PB1<Analog>;
 
@@ -196,7 +211,20 @@ pub type UsbDm<T>       = PA11<T>;
 /// USB D+
 pub type UsbDp<T>       = PA12<T>;
 
+
+**********************************************/
+
+/*
+    RGB led is rotated incorrectly on v0.2
+
+pub type RgbRLed = PA4<Output<PushPull>>;
+pub type RgbBLed = PA5<Output<PushPull>>;
+pub type RgbGLed = PA6<Output<PushPull>>;
+
+*/
+
 /// MAX31855K thermocouple converter - slave select, active low
+/// Spi2
 pub type KThermoNss     = PB12<Output<PushPull>>;
 /// MAX31855K thermocouple converter - serial-clock
 pub type KThermoSck     = PB13<Alternate<PushPull>>;
@@ -204,6 +232,4 @@ pub type KThermoSck     = PB13<Alternate<PushPull>>;
 pub type KThermoMiso    = PB14<Input<Floating>>;
 /// MAX31855K thermocouple converter - serial data in
 /// MAX31855K doesn't have this pin but HAL SPI interface requires it
-pub type KThermoMosiNotConnected = PB13<Alternate<PushPull>>;
-
-**********************************************/
+pub type KThermoMosiNotConnected = PB15<Alternate<PushPull>>;
