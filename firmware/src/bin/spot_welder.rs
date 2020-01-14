@@ -682,17 +682,17 @@ const APP: () = {
         enc_button,
         trigger_button,
     ])]
-    fn exti9_5(mut cx: exti9_5::Context) {        
+    fn exti9_5(cx: exti9_5::Context) {        
         if cx.resources.enc_button.check_interrupt() {
             cx.resources.enc_button.clear_interrupt_pending_bit();
             debug!("EXTI ENC");
-            encoder_button_pressed(&mut *cx.resources.weld_settings, &mut cx.resources.enc_quad);
+            encoder_button_pressed(cx.resources.weld_settings, cx.resources.enc_quad);
         } 
 
         if cx.resources.trigger_button.check_interrupt() {
             cx.resources.trigger_button.clear_interrupt_pending_bit();
             debug!("EXTI TRIGGER");
-            trigger_pressed(&*cx.resources.last_ntc_temp, &*cx.resources.last_thermocouple_temp, &mut *cx.resources.weld_triggered);
+            trigger_pressed(cx.resources.last_ntc_temp, cx.resources.last_thermocouple_temp, cx.resources.weld_triggered);
         }
     }
 
@@ -710,22 +710,22 @@ const APP: () = {
         last_ntc_temp,
         last_thermocouple_temp,
     ])]
-    fn tim8_up(mut cx: tim8_up::Context) {
+    fn tim8_up(cx: tim8_up::Context) {
         static mut COUNT: u16 = 0;
 
         cx.resources.ui_timer.clear_update_interrupt_flag();
 
         ui_timer_elapsed(
-            &mut *COUNT,
-            &mut *cx.resources.activity_led,
-            &mut cx.resources.ntc_dma_buffer, 
-            &mut cx.resources.last_ntc_temp,
-            &mut *cx.resources.max31855k, 
-            &mut *cx.resources.max31855k_cs, 
-            &mut *cx.resources.last_thermocouple_temp,
-            &mut cx.resources.weld_settings, 
-            &*cx.resources.enc_quad, 
-            &mut cx.resources.display,
+            COUNT,
+            cx.resources.activity_led,
+            cx.resources.ntc_dma_buffer, 
+            cx.resources.last_ntc_temp,
+            cx.resources.max31855k, 
+            cx.resources.max31855k_cs, 
+            cx.resources.last_thermocouple_temp,
+            cx.resources.weld_settings, 
+            cx.resources.enc_quad, 
+            cx.resources.display,
         );
     }
 
@@ -766,17 +766,17 @@ const APP: () = {
         }
 
         zero_crossing_event(
-            &mut *WELD_STATE,
-            &mut *cx.resources.weld_triggered,
-            &mut *WELD_COUNTER,
-            &*cx.resources.weld_settings,
-            &mut *A_DELAY,
-            &mut *B_ON,
-            &mut *B_DELAY,
-            &mut *ZC_PERIOD_US,
-            &mut *cx.resources.ssr_timer,
-            &*cx.resources.zc_in,
-            &*cx.resources.clocks,
+            WELD_STATE,
+            cx.resources.weld_triggered,
+            WELD_COUNTER,
+            cx.resources.weld_settings,
+            A_DELAY,
+            B_ON,
+            B_DELAY,
+            ZC_PERIOD_US,
+            cx.resources.ssr_timer,
+            cx.resources.zc_in,
+            cx.resources.clocks,
         );
     }
 };
@@ -968,7 +968,7 @@ fn zero_crossing_event(
             {
                 freq = zc_in
                     .read_frequency(ReadMode::Instant, clocks)
-                    .unwrap_or(0.hz());
+                    .unwrap_or(0.hz()).0;
             }
 
             *zc_period_us = 1000 / freq as u16;
