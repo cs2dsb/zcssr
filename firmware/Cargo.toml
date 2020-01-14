@@ -6,9 +6,9 @@ name = "zcssr"
 version = "0.1.0"
 
 [dependencies]
-cortex-m              = "0.5.10"
-cortex-m-rt           = "0.6.7"
-cortex-m-rtfm         = "0.4.3"
+cortex-m              = "0.6.0"
+cortex-m-rt           = "0.6.9"
+cortex-m-rtfm         = "0.5.0"
 stm32f1               = "0.8.0"
 stm32f1xx-hal         = { git = "https://github.com/stm32-rs/stm32f1xx-hal", features = ["stm32f103", "rt", "high"] }
 #stm32f1xx-hal         = { path = "../../stm32f1xx-hal", features = ["stm32f103", "rt", "high"] }

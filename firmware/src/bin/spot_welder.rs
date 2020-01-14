@@ -379,27 +379,38 @@ type ZcHandle = PwmInput<ZcTimer, Tim2NoRemap, (ZcRising, ZcFalling)>;
 #[cfg(feature = "dummy_zc")] 
 type ZcHandle = CountDownTimer<ZcTimer>;
 
-#[rtfm::app(device = stm32f1xx_hal::stm32)]
+#[rtfm::app(device = stm32f1xx_hal::stm32, peripherals = true)]
 const APP: () = {
-    static mut UI_TIMER: UiTimerHandle = ();
-    static mut ENC_QUAD: EncoderHandle = ();
-    static mut ZC_IN: ZcHandle = ();
-    static mut CLOCKS: Clocks = ();
-    static mut NTC_DMA_BUFFER: NtcDmaBufferHandle = ();
-    static mut DISPLAY: DisplayHandle = ();
-    static mut WELD_SETTINGS: WeldSettings = ();
-    static mut MAX31855K: Max31855Handle = ();
-    static mut MAX31855K_CS: KThermoNss = ();
-    static mut ACTIVITY_LED: ActivityLedHandle = ();
-    static mut LAST_NTC_TEMP: f32 = -400.;
-    static mut LAST_THERMOCOUPLE_TEMP: f32 = -400.;
-    static mut WELD_TRIGGERED: bool = false;
-    static mut SSR_TIMER: SsrTimerHandle = ();
-    static mut ENC_BUTTON: EncBtn = ();
-    static mut TRIGGER_BUTTON: Trigger = ();
+    struct Resources {
+        ui_timer: UiTimerHandle,
+        enc_quad: EncoderHandle,
+        zc_in: ZcHandle,
+        clocks: Clocks,
+        ntc_dma_buffer: NtcDmaBufferHandle,
+        display: DisplayHandle,
+        weld_settings: WeldSettings,
+        max31855k: Max31855Handle,
+        max31855k_cs: KThermoNss,
+        activity_led: ActivityLedHandle,
+        ssr_timer: SsrTimerHandle,
+        enc_button: EncBtn,
+        trigger_button: Trigger,
+
+        #[init(-400.)]
+        last_ntc_temp: f32,
+
+        #[init(-400.)]
+        last_thermocouple_temp: f32,
+
+        #[init(false)]
+        weld_triggered: bool,
+    }
     
     #[init]
-    fn init() -> init::LateResources {
+    fn init(cx: init::Context) -> init::LateResources {
+        let device = cx.device;
+        let mut core = cx.core;
+
         #[cfg(feature = "itm")]
         {
             // After reset the clock is set to HSI and the TPIU clock scaler doesn't get reset (unless openocd relaunches or gdb is set to do this)
@@ -603,6 +614,7 @@ const APP: () = {
                 SSR_TIMER_FREQ,
             );
         ssr_timer.set_duty(0);
+        ssr_timer.enable();
         unsafe {
             let tim = &(*TIM1::ptr());
             tim.cr1.modify(|_, w| w
@@ -637,96 +649,96 @@ const APP: () = {
         info!("Init done");
 
         init::LateResources {
-            UI_TIMER: ui_timer,
-            ENC_QUAD: quad_input,
-            ZC_IN: zc_in,
-            CLOCKS: clocks,
-            NTC_DMA_BUFFER: ntc_circ_buffer,
-            DISPLAY: ht16k33,
-            WELD_SETTINGS: weld_settings,
-            MAX31855K: max31855,
-            MAX31855K_CS: max31855_cs_pin,
-            ACTIVITY_LED: usr_led,
-            SSR_TIMER: ssr_timer,
-            ENC_BUTTON: enc_button,
-            TRIGGER_BUTTON: trigger_button,
+            ui_timer: ui_timer,
+            enc_quad: quad_input,
+            zc_in: zc_in,
+            clocks: clocks,
+            ntc_dma_buffer: ntc_circ_buffer,
+            display: ht16k33,
+            weld_settings: weld_settings,
+            max31855k: max31855,
+            max31855k_cs: max31855_cs_pin,
+            activity_led: usr_led,
+            ssr_timer: ssr_timer,
+            enc_button: enc_button,
+            trigger_button: trigger_button,
         }
     }
 
     #[idle]
-    fn idle() -> ! {
+    fn idle(_cx: idle::Context) -> ! {
         loop {
             asm::wfi();
         }
     }
 
     /// EXTI9_5 Interrupt handles the quad encoder button and the trigger button
-    #[interrupt(resources = [
-        ENC_QUAD, 
-        WELD_SETTINGS,
-        LAST_NTC_TEMP,
-        LAST_THERMOCOUPLE_TEMP,
-        WELD_TRIGGERED,
-        ENC_BUTTON,
-        TRIGGER_BUTTON,
+    #[task(binds = EXTI9_5, resources = [
+        enc_quad, 
+        weld_settings,
+        last_ntc_temp,
+        last_thermocouple_temp,
+        weld_triggered,
+        enc_button,
+        trigger_button,
     ])]
-    fn EXTI9_5() {        
-        if resources.ENC_BUTTON.check_interrupt() {
-            resources.ENC_BUTTON.clear_interrupt_pending_bit();
+    fn exti9_5(mut cx: exti9_5::Context) {        
+        if cx.resources.enc_button.check_interrupt() {
+            cx.resources.enc_button.clear_interrupt_pending_bit();
             debug!("EXTI ENC");
-            encoder_button_pressed(&mut *resources.WELD_SETTINGS, &mut resources.ENC_QUAD);
+            encoder_button_pressed(&mut *cx.resources.weld_settings, &mut cx.resources.enc_quad);
         } 
 
-        if resources.TRIGGER_BUTTON.check_interrupt() {
-            resources.TRIGGER_BUTTON.clear_interrupt_pending_bit();
+        if cx.resources.trigger_button.check_interrupt() {
+            cx.resources.trigger_button.clear_interrupt_pending_bit();
             debug!("EXTI TRIGGER");
-            trigger_pressed(&*resources.LAST_NTC_TEMP, &*resources.LAST_THERMOCOUPLE_TEMP, &mut *resources.WELD_TRIGGERED);
+            trigger_pressed(&*cx.resources.last_ntc_temp, &*cx.resources.last_thermocouple_temp, &mut *cx.resources.weld_triggered);
         }
     }
 
     /// TIM8_UP Interrupt handles reading temperatures and updating the UI
-    #[interrupt(resources = [
-        UI_TIMER, 
-        CLOCKS, 
-        DISPLAY, 
-        NTC_DMA_BUFFER, 
-        ENC_QUAD,
-        WELD_SETTINGS,
-        ACTIVITY_LED,
-        MAX31855K,
-        MAX31855K_CS,
-        LAST_NTC_TEMP,
-        LAST_THERMOCOUPLE_TEMP,
+    #[task(binds = TIM8_UP, resources = [
+        ui_timer, 
+        clocks, 
+        display, 
+        ntc_dma_buffer, 
+        enc_quad,
+        weld_settings,
+        activity_led,
+        max31855k,
+        max31855k_cs,
+        last_ntc_temp,
+        last_thermocouple_temp,
     ])]
-    fn TIM8_UP() {
+    fn tim8_up(mut cx: tim8_up::Context) {
         static mut COUNT: u16 = 0;
 
-        resources.UI_TIMER.clear_update_interrupt_flag();
+        cx.resources.ui_timer.clear_update_interrupt_flag();
 
         ui_timer_elapsed(
             &mut *COUNT,
-            &mut *resources.ACTIVITY_LED,
-            &mut resources.NTC_DMA_BUFFER, 
-            &mut resources.LAST_NTC_TEMP,
-            &mut *resources.MAX31855K, 
-            &mut *resources.MAX31855K_CS, 
-            &mut *resources.LAST_THERMOCOUPLE_TEMP,
-            &mut resources.WELD_SETTINGS, 
-            &*resources.ENC_QUAD, 
-            &mut resources.DISPLAY,
+            &mut *cx.resources.activity_led,
+            &mut cx.resources.ntc_dma_buffer, 
+            &mut cx.resources.last_ntc_temp,
+            &mut *cx.resources.max31855k, 
+            &mut *cx.resources.max31855k_cs, 
+            &mut *cx.resources.last_thermocouple_temp,
+            &mut cx.resources.weld_settings, 
+            &*cx.resources.enc_quad, 
+            &mut cx.resources.display,
         );
     }
 
     /// TIM2 Interrupt
     /// This timer is connected to the ZC circuit (or countdown if dummy_zc feature is enabled)
-    #[interrupt(resources = [
-        WELD_TRIGGERED,
-        WELD_SETTINGS,
-        SSR_TIMER,
-        ZC_IN,
-        CLOCKS,
+    #[task(binds = TIM2, resources = [
+        weld_triggered,
+        weld_settings,
+        ssr_timer,
+        zc_in,
+        clocks,
     ])]
-    fn TIM2() {
+    fn tim2(cx: tim2::Context) {
         // The current welding state
         static mut WELD_STATE: WeldState = WeldState::Idle;
         // Counter to progress through the current state
@@ -755,16 +767,16 @@ const APP: () = {
 
         zero_crossing_event(
             &mut *WELD_STATE,
-            &mut *resources.WELD_TRIGGERED,
+            &mut *cx.resources.weld_triggered,
             &mut *WELD_COUNTER,
-            &*resources.WELD_SETTINGS,
+            &*cx.resources.weld_settings,
             &mut *A_DELAY,
             &mut *B_ON,
             &mut *B_DELAY,
             &mut *ZC_PERIOD_US,
-            &mut *resources.SSR_TIMER,
-            &*resources.ZC_IN,
-            &*resources.CLOCKS,
+            &mut *cx.resources.ssr_timer,
+            &*cx.resources.zc_in,
+            &*cx.resources.clocks,
         );
     }
 };
