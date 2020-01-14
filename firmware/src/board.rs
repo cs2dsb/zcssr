@@ -9,7 +9,6 @@ use stm32f1xx_hal::{
         Analog,
         gpioa::*,
         gpiob::*,
-        gpioc::*,
     },    
     time::{
         *,
@@ -43,6 +42,13 @@ pub const ITM_BAUDRATE: MegaHertz = MegaHertz(2);
 pub const DISP_BAUDRATE: KiloHertz = KiloHertz(20);
 /// Address for I2C display
 pub const DISP_I2C_ADDR: u8 = 112;
+pub const DISP_START_TIMEOUT_US: u32 = 500;
+pub const DISP_START_RETRIES: u8 = 50;
+pub const DISP_ADDR_TIMEOUT_US: u32 = 5000;
+pub const DISP_DATA_TIMEOUT_US: u32 = 10000;
+
+pub const SSR_TIMER_FREQ: Hertz = Hertz(1);
+pub const SSR_TIMER_PERIOD_US: u32 = 1_000 / SSR_TIMER_FREQ.0;
 
 /// Baud rate for MAX31855 SPI
 //pub const MAX31855_BAUDRATE: KiloHertz = KiloHertz(100);
@@ -67,56 +73,6 @@ pub const NTC_B_COEFF: f32 = 3936.;
 pub const NTC_NOMINAL_TEMP: f32 = 25.;
 /// 0C in kelvin
 pub const CELCIUS_KELVIN_OFFSET: f32 = 273.15;
-
-/// Debug LED on PCB near MCU
-/// TIM3_CH2
-pub type LedUsr        = PA7<Output<PushPull>>;
-
-/// Status LED to indicate ready, error, etc.
-/// TIM8_CH3
-pub type LedStatus     = PC8<Alternate<PushPull>>;
-
-/// Status LED to indicate SSR status. Typically same state as SSR_EN
-/// TIM8_CH2
-pub type LedSsrStatus = PC7<Output<PushPull>>;
-
-/// Rotary encoder push button input. Active low
-/// EXTI5
-pub type EncBtn        = PB5<Input<Floating>>;
-
-/// Rotary encoder quadrature input A
-/// TIM4_CH1
-pub type EncA          = PB6<Input<Floating>>;
-
-/// Rotary encoder quadrature input B
-/// TIM4_CH2
-pub type EncB          = PB7<Input<Floating>>;
-
-/// NTC thermister input. Half way point of resistor divider VCC-10k-NTC-GND
-/// ADC1_CH9
-pub type Ntc            = PB1<Analog>;
-
-/// Input from zero crossing detection circuit. Active low
-/// TIM2_CH1
-pub type ZcRising       = PA0<Input<Floating>>;
-/// Input from zero crossing detection circuit. Active low
-/// TIM2_CH1
-pub type ZcFalling      = PA1<Input<Floating>>;
-
-/// User input trigger. Active low
-/// EXTI8
-pub type Trigger        = PA8<Output<PushPull>>;
-
-/// Output that triggers SSR to allow current flow. Active high
-pub type SsrEn         = PC9<Output<PushPull>>;
-
-/// I2C clock for quad 14(?) segment display
-/// I2C2
-pub type DispScl            = PB10<Alternate<OpenDrain>>;
-
-/// I2C data for quad 14(?) segment display
-/// I2C2
-pub type DispSda            = PB11<Alternate<OpenDrain>>;
 
 macro_rules! define_ptr_type {
     ($name: ident, $ptr: expr) => (
@@ -150,25 +106,24 @@ impl FlashSize {
     }
 }
 
-
-/********************************************** 
-    * V0.2 Board:
-
 /// Debug LED on PCB near MCU
 /// TIM3_CH2
-pub type LedUsr         = PA7<Alternate<PushPull>>;
+pub type LedUsr         = PA7<Output<PushPull>>;
 
 /// Status LED to indicate ready, error, etc.
 /// TIM5_CH3 (or TIM2_CH3)
-pub type LedStatus      = PA2<Alternate<PushPull>>;
+pub type LedStatus      = PA2<Output<PushPull>>;
 
 /// Status LED to indicate SSR status. Typically same state as SSR_EN
 /// TIM1_CH3
-pub type LedSsrStatus   = PA10<Alternate<PushPull>>;
+pub type LedSsrStatus   = PA10<Output<PushPull>>;
 
 /// Output that triggers SSR to allow current flow. Active high
 /// TIM1_CH2
-pub type SsrEn          = PA9<Alternate<PushPull>>;
+pub type SsrEn<M>          = PA9<M>;
+
+/// Misc output (fans etc)
+pub type MiscEn         = PB15<Output<PushPull>>;
 
 /// Rotary encoder push button input. Active low
 /// EXTI5
@@ -182,7 +137,7 @@ pub type EncA           = PB6<Input<Floating>>;
 /// TIM4_CH2
 pub type EncB           = PB7<Input<Floating>>;
 
-/// NTC thermister input. Half way point of resistor divider VCC-10k-[NTC]-GND
+/// NTC thermister input. Half way point of resistor divider VCC-10k-\[NTC\]-GND
 /// ADC1_CH9 (or ADC2_CH9)
 pub type Ntc            = PB1<Analog>;
 
@@ -211,25 +166,27 @@ pub type UsbDm<T>       = PA11<T>;
 /// USB D+
 pub type UsbDp<T>       = PA12<T>;
 
-
-**********************************************/
-
-/*
-    RGB led is rotated incorrectly on v0.2
-
-pub type RgbRLed = PA4<Output<PushPull>>;
-pub type RgbBLed = PA5<Output<PushPull>>;
-pub type RgbGLed = PA6<Output<PushPull>>;
-
-*/
-
 /// MAX31855K thermocouple converter - slave select, active low
 /// Spi2
 pub type KThermoNss     = PB12<Output<PushPull>>;
+
 /// MAX31855K thermocouple converter - serial-clock
+/// Spi2
 pub type KThermoSck     = PB13<Alternate<PushPull>>;
+
 /// MAX31855K thermocouple converter - serial data out
+/// Spi2
 pub type KThermoMiso    = PB14<Input<Floating>>;
+
 /// MAX31855K thermocouple converter - serial data in
+/// Spi2
 /// MAX31855K doesn't have this pin but HAL SPI interface requires it
 pub type KThermoMosiNotConnected = PB15<Alternate<PushPull>>;
+
+
+/*
+RGB led is rotated incorrectly on current batch of PCBs
+pub type RgbRLed = PA4<Output<PushPull>>;
+pub type RgbBLed = PA5<Output<PushPull>>;
+pub type RgbGLed = PA6<Output<PushPull>>;
+*/
