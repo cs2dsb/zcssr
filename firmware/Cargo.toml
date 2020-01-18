@@ -10,14 +10,15 @@ cortex-m              = "0.6.0"
 cortex-m-rt           = "0.6.9"
 cortex-m-rtfm         = "0.5.0"
 stm32f1               = "0.8.0"
-stm32f1xx-hal         = { git = "https://github.com/stm32-rs/stm32f1xx-hal", features = ["stm32f103", "rt", "high"] }
-#stm32f1xx-hal         = { path = "../../stm32f1xx-hal", features = ["stm32f103", "rt", "high"] }
+#stm32f1xx-hal         = { git = "https://github.com/stm32-rs/stm32f1xx-hal", features = ["stm32f103", "rt", "high"] }
+stm32f1xx-hal         = { path = "../../stm32f1xx-hal", features = ["stm32f103", "rt", "high"] }
 embedded-hal          = { version = "0.2.3", features = ["unproven"] }
 serde                 = { version = "^1.0", default-features = false, optional = true }
 serde_derive          = { version = "1.0", optional = true }
 aligned               = { version = "0.3.1", optional = true }
 framed                = { git = "https://github.com/fluffysquirrels/framed-rs", default-features = false, optional = true }
 itm_logger            = { git = "https://github.com/cs2dsb/itm_logger.rs", default-features = false }
+#itm_logger            = { path = "../../itm_logger", default-features = false }
 heapless              = { version = "0.4.1", features = [ "const-fn" ], optional = true}
 libm                  = "0.1.2"
 ht16k33               = { version = "0.4.0", default-features = false }

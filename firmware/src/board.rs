@@ -14,7 +14,10 @@ use stm32f1xx_hal::{
         *,
     },    
     spi::{Mode, Polarity, Phase},
+    i2c::Mode as I2cMode,
 };
+use core::convert::Infallible;
+use embedded_hal::digital::v2::OutputPin;
 
 /*
     MCU is STM32F103RCTx
@@ -39,10 +42,11 @@ pub const ADC_FREQ: MegaHertz = MegaHertz(2);
 pub const ITM_BAUDRATE: MegaHertz = MegaHertz(2);
 
 /// Baud rate for I2C display
-pub const DISP_BAUDRATE: KiloHertz = KiloHertz(20);
+pub const DISP_BAUDRATE: Hertz = Hertz(20_000);
+pub const DISP_I2C_MODE: I2cMode = I2cMode::Standard { frequency: DISP_BAUDRATE };
 /// Address for I2C display
 pub const DISP_I2C_ADDR: u8 = 112;
-pub const DISP_START_TIMEOUT_US: u32 = 500;
+pub const DISP_START_TIMEOUT_US: u32 = 5000;
 pub const DISP_START_RETRIES: u8 = 50;
 pub const DISP_ADDR_TIMEOUT_US: u32 = 5000;
 pub const DISP_DATA_TIMEOUT_US: u32 = 10000;
@@ -106,24 +110,59 @@ impl FlashSize {
     }
 }
 
+/// This trait hides if an output is active low or active high
+/// Infallible error type allows .unwrap on set_high and set_low
+pub trait EnableOutput: OutputPin<Error = Infallible> {
+    fn on(&mut self);
+    fn off(&mut self);
+}
+
+const ACTIVE_HIGH: bool = true;
+const ACTIVE_LOW: bool = false;
+
+macro_rules! define_enable_output {
+    ($name: ty, $active_high: expr) => (
+        impl EnableOutput for $name {
+            fn on(&mut self) {
+                if $active_high {
+                    self.set_high().unwrap()
+                } else {
+                    self.set_low().unwrap()
+                }
+            }
+            fn off(&mut self) {
+                if $active_high {
+                    self.set_low().unwrap()
+                } else {
+                    self.set_high().unwrap()
+                }
+            }
+        }
+    )
+}
+
 /// Debug LED on PCB near MCU
 /// TIM3_CH2
 pub type LedUsr         = PA7<Output<PushPull>>;
+define_enable_output!(LedUsr, ACTIVE_LOW);
 
 /// Status LED to indicate ready, error, etc.
 /// TIM5_CH3 (or TIM2_CH3)
 pub type LedStatus      = PA2<Output<PushPull>>;
+define_enable_output!(LedStatus, ACTIVE_HIGH);
 
 /// Status LED to indicate SSR status. Typically same state as SSR_EN
 /// TIM1_CH3
 pub type LedSsrStatus   = PA10<Output<PushPull>>;
+define_enable_output!(LedSsrStatus, ACTIVE_HIGH);
 
 /// Output that triggers SSR to allow current flow. Active high
 /// TIM1_CH2
-pub type SsrEn<M>          = PA9<M>;
+pub type SsrEn<M>       = PA9<M>;
 
 /// Misc output (fans etc)
 pub type MiscEn         = PB15<Output<PushPull>>;
+define_enable_output!(MiscEn, ACTIVE_HIGH);
 
 /// Rotary encoder push button input. Active low
 /// EXTI5
@@ -169,6 +208,7 @@ pub type UsbDp<T>       = PA12<T>;
 /// MAX31855K thermocouple converter - slave select, active low
 /// Spi2
 pub type KThermoNss     = PB12<Output<PushPull>>;
+define_enable_output!(KThermoNss, ACTIVE_LOW);
 
 /// MAX31855K thermocouple converter - serial-clock
 /// Spi2

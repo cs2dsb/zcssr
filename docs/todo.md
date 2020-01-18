@@ -20,3 +20,6 @@
 
 ## Hardware
 - [ ] Add hardware debouncing to trigger
+- [ ] Add pull-up to SCL
+- [ ] Make I2C pull ups optional since adafruit module already includes them
+- [ ] Make I2C pull ups 2.2k since 3.3v not 5v

@@ -10,6 +10,7 @@ use cortex_m::{asm, singleton};
 use core::{
     panic::PanicInfo,
     sync::atomic::{self, Ordering},
+    ops::RangeInclusive,
 };
 use cortex_m::{
     interrupt,
@@ -87,15 +88,16 @@ use stm32f1xx_hal::{
     },
     i2c::{
         I2c,
-        Mode as I2cMode,
         blocking_i2c,
         BlockingI2c,
+        HungFix,
     },    
     spi::{
         Spi,
         Spi2NoRemap,
         NoMosi,
     },
+    delay::Delay,
 };
 
 #[cfg(not(feature = "dummy_zc"))]
@@ -112,7 +114,7 @@ const HT16K33_MISSING_FATAL: bool = false;
 
 // If true, wait (possible forever) for first zero crossing
 #[cfg(not(feature = "dummy_zc"))]
-const WAIT_FOR_ZC_INIT: bool = false;
+const WAIT_FOR_ZC_INIT: bool = true;
 
 #[cfg(feature = "dummy_zc")]
 const DUMMY_FREQ: Hertz = Hertz(100);
@@ -122,6 +124,19 @@ const NTC_RANGE: Option<(f32, f32)> = Some((1., 30.));
 
 // If supplied, make sure thermocouple temperature is in this range before welding
 const THERMOCOUPLE_RANGE: Option<(f32, f32)> = Some((1., 30.));
+
+// These ranges specify the min, max and actual frequencies.
+// Mains frequency is generally very stable in most countries
+// so if we're reading outside these values there is likely something
+// wrong with our hardware. Attempting to start a weld with a 
+// measured frequency outside of one of these ranges will cause
+// a panic.
+// The actual frequency is provided so our microsecond to zero crossing
+// calculation is more accurate.
+const ACCEPTABLE_ZC_FREQ_RANGES: [(RangeInclusive<u16>, u16); 2] = [
+    (98..=102, 100),
+    (118..=122, 120),
+];
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum WeldState {
@@ -395,6 +410,7 @@ const APP: () = {
         ssr_timer: SsrTimerHandle,
         enc_button: EncBtn,
         trigger_button: Trigger,
+        status_led: LedStatus,
 
         #[init(-400.)]
         last_ntc_temp: f32,
@@ -411,13 +427,32 @@ const APP: () = {
         let device = cx.device;
         let mut core = cx.core;
 
+        // Constrain as much hardware here as possible without rcc::Clocks
+        let mut rcc = device.RCC.constrain();
+        let mut flash = device.FLASH.constrain();
+        let mut gpioa = device.GPIOA.split(&mut rcc.apb2);
+        let mut afio = device.AFIO.constrain(&mut rcc.apb2);
+        let mut gpiob = device.GPIOB.split(&mut rcc.apb2);
+        let dma1 = device.DMA1.split(&mut rcc.ahb);
+
+        // PCB activity LED
+        // It's configured here and set low (on) so that it's possible to tell
+        // if the program has loaded without ITM for debugging. The `on`
+        // can be moved down line by line to debug if the init function is ok
+        // with OpenOCD connected but failing standalone. (Example of this
+        // was that ITM logging wasn't checking ITM was enabled before querying
+        // the STIM FIFO status.
+        let mut usr_led = gpioa.pa7.into_push_pull_output(&mut gpioa.crl);
+        usr_led.on();
+
         #[cfg(feature = "itm")]
-        {
+        {        
             // After reset the clock is set to HSI and the TPIU clock scaler doesn't get reset (unless openocd relaunches or gdb is set to do this)
             let hsi: Hertz = HSI.into();
             let baud: Hertz = ITM_BAUDRATE.into();
             update_tpiu_baudrate(hsi.0, baud.0).expect("Failed to reset TPIU baudrate");
             logger_init();
+
 
             unsafe {
                 //TODO: move to itm_logger crate
@@ -426,17 +461,9 @@ const APP: () = {
                     w | (1 << 1)
                 );
             }
-
-            info!("ITM reset");
         }
 
         // Configure the clock for full speed
-        let mut rcc = device
-            .RCC
-            .constrain();
-        let mut flash = device
-            .FLASH
-            .constrain();
         let clocks = rcc.cfgr
             .use_hse(HSE)
             .sysclk(SYSCLK_FREQ)
@@ -445,6 +472,9 @@ const APP: () = {
             .adcclk(ADC_FREQ)
             .freeze(&mut flash.acr);
 
+        // The rest of the constraining now that we have rcc::Clocks
+        let adc1 = Adc::adc1(device.ADC1, &mut rcc.apb2, clocks);
+        let mut delay = Delay::new(core.SYST, clocks);
 
         #[cfg(feature = "itm")]
         {
@@ -456,30 +486,36 @@ const APP: () = {
 
         info!("Configured max freq");
 
-        // BlockingI2c relies upon DWT being running
-        core.DWT.enable_cycle_counter();
 
-        let mut afio = device.AFIO.constrain(&mut rcc.apb2);
-        let mut gpioa = device.GPIOA.split(&mut rcc.apb2);
-        let mut gpiob = device.GPIOB.split(&mut rcc.apb2);
-        //let gpioc = device.GPIOC.split(&mut rcc.apb2);
-        let adc1 = Adc::adc1(device.ADC1, &mut rcc.apb2, clocks);
-        let dma1 = device.DMA1.split(&mut rcc.ahb);
 
         // Initialize the I2C display
         // Extra logging is because this tends to fail/hang so it's nice to see what was happening in the log
         //TODO: this is "timing out" fairly frequently since stm32f1-hal/pull/#150 was merged. Increasing the timeout and retries 
         //      doesn't work so suspect there's a logic bug in there somewhere
         debug!("Initializing I2C display...");
-        let scl_pin: DispScl = gpiob.pb10.into_alternate_open_drain(&mut gpiob.crh);
-        let sda_pin: DispSda = gpiob.pb11.into_alternate_open_drain(&mut gpiob.crh);
+        // BlockingI2c relies upon DWT being running
+        core.DWT.enable_cycle_counter();
+        let i2c_pins: (DispScl, DispSda) = {
+            let mut pins = (
+                gpiob.pb10.into_push_pull_output_with_state(&mut gpiob.crh, stm32f1xx_hal::gpio::State::High),
+                gpiob.pb11.into_floating_input(&mut gpiob.crh),
+            );
+
+            pins.try_hung_fix(&mut delay, DISP_I2C_MODE).expect("I2C bus is hung");
+            (
+                pins.0.into_alternate_open_drain(&mut gpiob.crh),
+                pins.1.into_alternate_open_drain(&mut gpiob.crh),
+            )
+        };
+        unsafe {
+            let i2c = &(*I2C2::ptr());
+            info!("I2C: {:?}",  any_as_u8_slice(i2c));
+        }
         let i2c2 = blocking_i2c(
             I2c::i2c2(
                 device.I2C2, 
-                (scl_pin, sda_pin),
-                I2cMode::Standard {
-                    frequency: DISP_BAUDRATE.into(),
-                },
+                i2c_pins,
+                DISP_I2C_MODE,
                 clocks,
                 &mut rcc.apb1,
             ),
@@ -490,24 +526,27 @@ const APP: () = {
             DISP_DATA_TIMEOUT_US,
         );
         let mut ht16k33 = HT16K33::new(i2c2, DISP_I2C_ADDR);
-        ht16k33.initialize().unwrap();
         if ht16k33.initialize().is_err() ||
            ht16k33.set_display(Display::ON).is_err() ||
            ht16k33.write_display_buffer().is_err()
         {
+            unsafe {
+            let i2c = &(*I2C2::ptr());
+            info!("I2C: {:?}",  any_as_u8_slice(i2c));
+        }
             if HT16K33_MISSING_FATAL {
                 panic!("Failed to initialize ht16k33");
             } else {
                 error!("Failed to initialize ht16k33");
             }
         }
+        
+        unsafe {
+            let i2c = &(*I2C2::ptr());
+            info!("I2C: {:?}",  any_as_u8_slice(i2c));
+        }
         debug!("...done");
 
-
-        // User led (red)
-        let mut usr_led = gpioa.pa7.into_push_pull_output(&mut gpioa.crl);
-        usr_led.set_high().unwrap();
-        
         
         // Initialize the spi thermocouple chip
         let sck_pin: KThermoSck = gpiob.pb13.into_alternate_push_pull(&mut gpiob.crh);
@@ -561,17 +600,17 @@ const APP: () = {
 
         // Status LED
         let mut led_status: LedStatus = gpioa.pa2.into_push_pull_output(&mut gpioa.crl);
-        led_status.set_high().unwrap();
+        led_status.off();
 
 
         // SSR status LED
         let mut led_ssr: LedSsrStatus = gpioa.pa10.into_push_pull_output(&mut gpioa.crh);
-        led_ssr.set_high().unwrap();   
+        led_ssr.off();   
 
 
         // Misc en
         let mut misc_en: MiscEn = gpiob.pb15.into_push_pull_output(&mut gpiob.crh);
-        misc_en.set_high().unwrap();
+        misc_en.off();
 
 
         // ZC input
@@ -662,6 +701,7 @@ const APP: () = {
             ssr_timer: ssr_timer,
             enc_button: enc_button,
             trigger_button: trigger_button,
+            status_led: led_status,
         }
     }
 
@@ -685,13 +725,13 @@ const APP: () = {
     fn exti9_5(cx: exti9_5::Context) {        
         if cx.resources.enc_button.check_interrupt() {
             cx.resources.enc_button.clear_interrupt_pending_bit();
-            debug!("EXTI ENC");
+            debug!("EXTI encoder button pressed");
             encoder_button_pressed(cx.resources.weld_settings, cx.resources.enc_quad);
         } 
 
         if cx.resources.trigger_button.check_interrupt() {
             cx.resources.trigger_button.clear_interrupt_pending_bit();
-            debug!("EXTI TRIGGER");
+            debug!("EXTI trigger pressed");
             trigger_pressed(cx.resources.last_ntc_temp, cx.resources.last_thermocouple_temp, cx.resources.weld_triggered);
         }
     }
@@ -737,6 +777,7 @@ const APP: () = {
         ssr_timer,
         zc_in,
         clocks,
+        status_led,
     ])]
     fn tim2(cx: tim2::Context) {
         // The current welding state
@@ -749,6 +790,9 @@ const APP: () = {
         static mut B_DELAY: u16 = 0;
         // The measured ZC period in microseconds. Measured just before weld is started and referred to until weld is finished
         static mut ZC_PERIOD_US: u16 = 0;
+
+        // This is purely to divide the zc rate down to a level that is visible on the status led
+        static mut COUNT: u16 = 0;
 
         // Clear interrupt
         #[cfg(feature = "dummy_zc")]
@@ -763,6 +807,13 @@ const APP: () = {
                 .cc1if().clear_bit()
                 .cc2if().clear_bit()
             );
+        }
+
+        *COUNT += 1;
+        if *COUNT % 20 == 0 {
+            cx.resources.status_led.on();
+        } else {
+            cx.resources.status_led.off();
         }
 
         zero_crossing_event(
@@ -799,7 +850,9 @@ impl PulseSsr for SsrTimerHandle {
 
         self.set_duty(duty);
     
-        info!("Pulsing: {}us, duty: {}", desired_us, duty);
+        debug!("Starting SSR pulse, desired_us: {}, duty: {}/{}",
+            desired_us, duty, max_duty);
+
         unsafe {
             let tim = &(*SsrTimer::ptr());
 
@@ -908,7 +961,7 @@ fn ui_timer_elapsed(
     display: &mut DisplayHandle,
 ) {
     // Turn on the led to show activity
-    activity_led.set_low().unwrap();
+    activity_led.on();
 
     // Update the NTC temp
     read_ntc_temp(dma_buffer, last_ntc_temp);        
@@ -930,7 +983,7 @@ fn ui_timer_elapsed(
     }
 
     // Turn the led off again
-    activity_led.set_high().unwrap();
+    activity_led.off();
     *count += 1;
 }
 
@@ -951,10 +1004,15 @@ fn zero_crossing_event(
     #[cfg_attr(feature = "dummy_zc", allow(unused_variables))]
     clocks: &Clocks,
 ) {
-    // Converts the weld counter from microseconds to zc events
-    //TODO: fix this smell (counter is in zc events but pulses are in microseconds)
-    let convert_weld_counter = |weld_counter: &mut u16, zc_period_us: &mut u16| {
-        *weld_counter = (*weld_counter + (*zc_period_us / 2)) / *zc_period_us;
+    // Converts microseconds to zero crossing count
+    let pulse_us_to_zc = |us: u16, zc_period_us: u16| -> u16 {
+        (us + (zc_period_us / 2)) / zc_period_us
+    };
+
+    // Converts number of zero crossings to a pulse period microseconds
+    // Adds half a period to make sure we catch the start of the final zero crossing
+    let zc_to_pulse_us = |zc: u16, zc_period_us: u16| -> u16 {
+        zc * zc_period_us + zc_period_us / 2
     };
 
     if *weld_state == WeldState::Idle {
@@ -962,28 +1020,37 @@ fn zero_crossing_event(
             let freq;
             #[cfg(feature = "dummy_zc")]
             {
-                freq = DUMMY_FREQ.0;
+                freq = DUMMY_FREQ.0 as u16;
             }
             #[cfg(not(feature = "dummy_zc"))]
             {
                 freq = zc_in
                     .read_frequency(ReadMode::Instant, clocks)
-                    .unwrap_or(0.hz()).0;
+                    .unwrap_or(0.hz()).0 as u16;
             }
 
-            *zc_period_us = 1000 / freq as u16;
+            let (_, actual) = ACCEPTABLE_ZC_FREQ_RANGES
+                .iter()
+                .find(|(range, _)| range.contains(&freq))
+                //TODO: Do something nicer than panic once UI is a bit more polished
+                .unwrap_or_else(|| panic!("Actual frequency ({}) is outside of acceptable ranges", freq));
+
+            *zc_period_us = 1000 / *actual;
 
             *weld_state = WeldState::AWeld;
-            *weld_counter = weld_settings.pulse_a_on.value;
-            *a_delay = weld_settings.pulse_a_delay.value;
-            *b_on = weld_settings.pulse_b_on.value;
-            *b_delay = weld_settings.pulse_b_delay.value;
+            *weld_counter = pulse_us_to_zc(weld_settings.pulse_a_on.value, *zc_period_us);
+            *a_delay = pulse_us_to_zc(weld_settings.pulse_a_delay.value, *zc_period_us);
+            *b_on = pulse_us_to_zc(weld_settings.pulse_b_on.value, *zc_period_us);
+            *b_delay = pulse_us_to_zc(weld_settings.pulse_b_delay.value, *zc_period_us);
             
-            info!("Configure OPM, start. ({}, {}, {}, {})", *weld_counter, *a_delay, *b_on, *b_delay);
+            debug!("Welding. ZC counts = a_on: {}, a_delay: {}, b_on: {} b_delay: {}",
+                *weld_counter, *a_delay, *b_on, *b_delay);
 
-            ssr_timer.pulse(*weld_counter as u32);
-            convert_weld_counter(weld_counter, zc_period_us);
-
+            ssr_timer.pulse(
+                zc_to_pulse_us(
+                    *weld_counter, 
+                    *zc_period_us) as u32
+            );
         }
     } else {
         let done = if *weld_counter > 0 {
@@ -999,26 +1066,25 @@ fn zero_crossing_event(
                 WeldState::AWeld => {
                     *weld_counter = *a_delay;
                     *weld_state = WeldState::ADelay;
-                    info!("AOn done. Waiting: {}", *a_delay);
                 },
                 WeldState::ADelay => {
                     *weld_counter = *b_on;
                     *weld_state = WeldState::BWeld;
-                    ssr_timer.pulse(*weld_counter as u32);
-                    info!("ADelay done. Configure OPM(B). Welding: {}", *b_on);
+                    ssr_timer.pulse(
+                        zc_to_pulse_us(
+                            *weld_counter, 
+                            *zc_period_us) as u32
+                    );
                 },
                 WeldState::BWeld => {
                     *weld_counter = *b_delay;
                     *weld_state = WeldState::BDelay;
-                    info!("BOn done. Waiting: {}", *b_delay);
                 },
                 WeldState::BDelay => {
                     *weld_state = WeldState::Idle;
                     *weld_triggered = false;
-                    info!("BDelay done. Returning to idle");
                 },
             }
-            convert_weld_counter(weld_counter, zc_period_us);
         }
     }
 }
@@ -1073,4 +1139,12 @@ fn panic(info: &PanicInfo) -> ! {
         // see rust-lang/rust#28728 for details
         atomic::compiler_fence(Ordering::SeqCst)
     }
+}
+
+unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
+    info!("Size: {}", ::core::mem::size_of::<T>());
+    ::core::slice::from_raw_parts(
+        (p as *const T) as *const u8,
+        ::core::mem::size_of::<T>(),
+    )
 }
