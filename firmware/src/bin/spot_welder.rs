@@ -12,31 +12,26 @@ use core::{
     sync::atomic::{self, Ordering},
     ops::RangeInclusive,
 };
-use cortex_m::{
-    interrupt,
-    iprintln,
-};
+use cortex_m::interrupt;
 
 // For ln
 use libm::F32Ext;
 
 #[cfg(feature = "itm")] 
 use {
-    cortex_m::peripheral::ITM,
+    cortex_m::{iprintln, peripheral::ITM},
     itm_logger::*,
 };
 
 #[cfg(not(feature = "itm"))] 
-use itm_logger::{ info, error, warn, debug };
+use itm_logger::{ info, error, warn, debug, log, Level };
 
-use zcssr::board::*;
-
-use adafruit_alphanum4::{
-    AlphaNum4,
-    Index,
-    AsciiChar,
+use zcssr::{
+    board::*,
+    ui::welder::WelderUi,
 };
 
+#[cfg_attr(not(feature = "thermocouple"), allow(unused_imports))]
 use max31855::{
     Max31855,
     Unit,
@@ -68,9 +63,9 @@ use stm32f1xx_hal::{
         Edge,
     },    
     timer::*,
-    time::Hertz,
     pwm::{
         C2,
+        C3,
         Pwm,
     },
     qei::Qei,
@@ -108,9 +103,13 @@ use stm32f1xx_hal::{
         PwmInput,
     },
 };
+#[cfg(any(feature = "dummy_zc", feature = "itm"))]
+use stm32f1xx_hal::{
+    time::Hertz,
+};
 
 // If true, panic on failure to configure HT16K33, else just log it
-const HT16K33_MISSING_FATAL: bool = false;
+const HT16K33_MISSING_FATAL: bool = true;
 
 // If true, wait (possible forever) for first zero crossing
 #[cfg(not(feature = "dummy_zc"))]
@@ -123,6 +122,7 @@ const DUMMY_FREQ: Hertz = Hertz(100);
 const NTC_RANGE: Option<(f32, f32)> = Some((1., 30.));
 
 // If supplied, make sure thermocouple temperature is in this range before welding
+#[cfg(feature = "thermocouple")]
 const THERMOCOUPLE_RANGE: Option<(f32, f32)> = Some((1., 30.));
 
 // These ranges specify the min, max and actual frequencies.
@@ -147,230 +147,6 @@ pub enum WeldState {
     BDelay,
 }
 
-const MAX_SETTING_CHARS: usize = 32;
-
-#[derive(Debug)]
-pub struct Setting {
-    pub characters: [AsciiChar; MAX_SETTING_CHARS],
-    pub len: usize,
-    pub single_char: AsciiChar,
-    pub single_char_dot: bool,
-    pub value: u16,
-}
-
-impl Setting {
-    pub fn new(string: &str, single_char: char, single_char_dot: bool, value: u16) -> Self {
-        assert!(string.len() <= MAX_SETTING_CHARS);
-        let mut characters = [AsciiChar::new(' '); MAX_SETTING_CHARS];
-        for (i, c) in string.chars().enumerate() {
-            characters[i] = AsciiChar::from_ascii(c).unwrap();
-        }
-        let single_char = AsciiChar::from_ascii(single_char).unwrap();
-        Self {
-            characters,
-            len: string.len(),
-            single_char,
-            single_char_dot,
-            value,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct DisplayMessage {
-    characters: [AsciiChar; MAX_SETTING_CHARS],
-    len: usize,
-    pos: usize,
-    tick: usize,
-    ticks_per_scroll: usize,
-    ticks_before_expand: usize,
-    single_char: AsciiChar,
-    single_char_dot: bool,
-    expanded: bool,
-    value: f32,
-}
-
-impl DisplayMessage {
-    const fn blank() -> AsciiChar {
-        AsciiChar::new(' ')
-    }
-
-    pub const fn default() -> Self {
-        Self {
-            characters: [Self::blank(); MAX_SETTING_CHARS],
-            len: 0,
-            pos: 0,
-            tick: 0,
-            ticks_per_scroll: 2,
-            ticks_before_expand: 15,
-            single_char: Self::blank(),
-            single_char_dot: false,
-            expanded: false,
-            value: 0.,
-        }
-    }
-
-    pub fn tick<T, I>(&mut self, display: &mut T)
-    where 
-        T: AlphaNum4<I>
-    {
-        if self.expanded {
-            for i in 0..4 {
-                let p = self.pos + i;
-                let ch = if p < self.len { self.characters[p] } else { Self::blank() };
-                display.update_buffer_with_char(Index::from(i as u8), ch);
-            }
-        } else {
-            display.update_buffer_with_char(Index::One, self.single_char);
-            if self.single_char_dot {
-                display.update_buffer_with_dot(Index::One, true);
-            }
-            //TODO: return result
-            display.update_buffer_with_float(Index::Two, self.value, 0, 10).unwrap();
-        }
-
-        self.tick += 1;
-        if self.expanded && self.tick >= self.ticks_per_scroll {
-            self.tick = 0;
-            if self.pos >= self.len {
-                self.pos = 0;
-                self.expanded = false;
-            } else {
-                self.pos += 1;
-            }
-        } else if !self.expanded && self.tick >= self.ticks_before_expand {
-            self.tick = 0;
-            self.expanded = true;
-        }
-    }
-
-    pub fn set_text(&mut self, text: [AsciiChar; MAX_SETTING_CHARS], len: usize, char: AsciiChar, dot: bool) {
-        assert!(len < MAX_SETTING_CHARS);
-        self.characters = text;
-        self.len = len;
-        self.single_char = char;
-        self.single_char_dot = dot;
-    }
-
-    pub fn set_value(&mut self, value: f32) {
-        if self.value != value {
-            self.value = value;
-            self.tick = 0;
-            self.expanded = false;
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum WeldSetting {
-    PulseAOn,
-    PulseADelay,
-    PulseBOn,
-    PulseBDelay,
-}
-
-impl Default for WeldSetting {
-    fn default() -> Self {
-        WeldSetting::PulseAOn
-    }
-}
-
-impl WeldSetting {
-    pub fn next(self) -> Self {
-        match self {
-            WeldSetting::PulseAOn => WeldSetting::PulseADelay,
-            WeldSetting::PulseADelay => WeldSetting::PulseBOn,
-            WeldSetting::PulseBOn => WeldSetting::PulseBDelay,
-            WeldSetting::PulseBDelay => WeldSetting::PulseAOn,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct WeldSettings {
-    pulse_a_on: Setting,
-    pulse_a_delay: Setting,
-    pulse_b_on: Setting,
-    pulse_b_delay: Setting,
-    current_setting: WeldSetting,
-    display_message: DisplayMessage,
-}
-
-impl WeldSettings {
-    pub fn new() -> Self {
-        let mut self_ = Self {
-            pulse_a_on: Setting::new("A-PULSE ON TIME", 'A', false, 200),
-            pulse_a_delay: Setting::new("A DELAY TIME", 'A', true, 300),
-            pulse_b_on: Setting::new("B-PULSE ON TIME", 'B', false, 100),
-            pulse_b_delay: Setting::new("B DELAY TIME", 'B', true, 400),
-            current_setting: WeldSetting::default(),
-            display_message: DisplayMessage::default(),
-        };
-        self_.update_message();
-        self_
-    }
-
-    fn current_setting(&self) -> &Setting {
-        match self.current_setting {
-            WeldSetting::PulseAOn => &self.pulse_a_on,
-            WeldSetting::PulseADelay => &self.pulse_a_delay,
-            WeldSetting::PulseBOn => &self.pulse_b_on,
-            WeldSetting::PulseBDelay => &self.pulse_b_delay,
-        }
-    }
-
-    fn current_setting_mut(&mut self) -> &mut Setting {
-        match self.current_setting {
-            WeldSetting::PulseAOn => &mut self.pulse_a_on,
-            WeldSetting::PulseADelay => &mut self.pulse_a_delay,
-            WeldSetting::PulseBOn => &mut self.pulse_b_on,
-            WeldSetting::PulseBDelay => &mut self.pulse_b_delay,
-        }
-    }
-
-    fn update_message(&mut self) {
-        let (text, len, sc, dot, value) = {
-            let cs = self.current_setting();
-            (cs.characters.clone(), cs.len, cs.single_char, cs.single_char_dot, cs.value)
-        };
-        self.display_message.set_text(text, len, sc, dot);
-        self.display_message.set_value(value as f32);
-    }
-
-    pub fn set_value(&mut self, value: u16) {
-        let mut cs = self.current_setting_mut();
-        if cs.value != value {
-            cs.value = value;
-            let valuef = value as f32;
-            self.display_message.set_value(valuef);
-        }
-    }
-
-    pub fn tick<T, I>(&mut self, display: &mut T)
-    where 
-        T: AlphaNum4<I>
-    {
-        self.display_message.tick(display);
-    }
-
-    pub fn next(&mut self) {
-        self.current_setting = self.current_setting.next();
-        self.update_message();
-    }
-
-    pub fn value(&self) -> u16 {
-        self.current_setting().value
-    }
-
-    pub fn update_from_quad(&mut self, quad: &EncoderHandle) {
-        self.set_value(quad.count() % 99 * 10);
-    }
-
-    pub fn update_quad_from_value(&self, quad: &mut EncoderHandle) {
-        update_quad_count(quad, self.value() / 10);
-    }
-}
-
 /// Zero crossing timer reads pwm input from the zero crossing detection circuit (or a dummy count down timer if dummy_zc feature is enabled)
 type ZcTimer = TIM2_REG;
 /// Quadrature encoder timer reads the quad input from the rotary encoder
@@ -388,11 +164,32 @@ type Max31855CsHandle = KThermoNss;
 type DisplayHandle = HT16K33<BlockingI2c<I2C2, (DispScl, DispSda)>>;
 type ActivityLedHandle = LedUsr;
 type UiTimerHandle = CountDownTimer<UiTimer>;
-type SsrTimerHandle = Pwm<SsrTimer, C2>;
+type SsrTimerHandle = (Pwm<SsrTimer, C2>, Pwm<SsrTimer, C3>);
 #[cfg(not(feature = "dummy_zc"))] 
 type ZcHandle = PwmInput<ZcTimer, Tim2NoRemap, (ZcRising, ZcFalling)>;
 #[cfg(feature = "dummy_zc")] 
 type ZcHandle = CountDownTimer<ZcTimer>;
+
+// Convenience trait to treat multiple Pwm channels as one 
+trait Pwm_{
+    fn get_max_duty(&self) -> u16;
+    fn set_duty(&mut self, duty: u16);
+    fn enable(&mut self);
+}
+// Used here to make sure ssr status led is on the same time as the ssr output
+impl Pwm_ for SsrTimerHandle {    
+    fn get_max_duty(&self) -> u16 {
+        self.0.get_max_duty()
+    }
+    fn set_duty(&mut self, duty: u16) {
+        self.0.set_duty(duty);
+        self.1.set_duty(duty);
+    }
+    fn enable(&mut self) {
+        self.0.enable();
+        self.1.enable();
+    }
+}
 
 #[rtfm::app(device = stm32f1xx_hal::stm32, peripherals = true)]
 const APP: () = {
@@ -403,7 +200,6 @@ const APP: () = {
         clocks: Clocks,
         ntc_dma_buffer: NtcDmaBufferHandle,
         display: DisplayHandle,
-        weld_settings: WeldSettings,
         max31855k: Max31855Handle,
         max31855k_cs: KThermoNss,
         activity_led: ActivityLedHandle,
@@ -411,6 +207,7 @@ const APP: () = {
         enc_button: EncBtn,
         trigger_button: Trigger,
         status_led: LedStatus,
+        welder_ui: WelderUi,
 
         #[init(-400.)]
         last_ntc_temp: f32,
@@ -443,6 +240,7 @@ const APP: () = {
         // was that ITM logging wasn't checking ITM was enabled before querying
         // the STIM FIFO status.
         let mut usr_led = gpioa.pa7.into_push_pull_output(&mut gpioa.crl);
+        usr_led.off();
         usr_led.on();
 
         #[cfg(feature = "itm")]
@@ -452,7 +250,6 @@ const APP: () = {
             let baud: Hertz = ITM_BAUDRATE.into();
             update_tpiu_baudrate(hsi.0, baud.0).expect("Failed to reset TPIU baudrate");
             logger_init();
-
 
             unsafe {
                 //TODO: move to itm_logger crate
@@ -487,11 +284,8 @@ const APP: () = {
         info!("Configured max freq");
 
 
-
         // Initialize the I2C display
         // Extra logging is because this tends to fail/hang so it's nice to see what was happening in the log
-        //TODO: this is "timing out" fairly frequently since stm32f1-hal/pull/#150 was merged. Increasing the timeout and retries 
-        //      doesn't work so suspect there's a logic bug in there somewhere
         debug!("Initializing I2C display...");
         // BlockingI2c relies upon DWT being running
         core.DWT.enable_cycle_counter();
@@ -507,10 +301,6 @@ const APP: () = {
                 pins.1.into_alternate_open_drain(&mut gpiob.crh),
             )
         };
-        unsafe {
-            let i2c = &(*I2C2::ptr());
-            info!("I2C: {:?}",  any_as_u8_slice(i2c));
-        }
         let i2c2 = blocking_i2c(
             I2c::i2c2(
                 device.I2C2, 
@@ -530,20 +320,11 @@ const APP: () = {
            ht16k33.set_display(Display::ON).is_err() ||
            ht16k33.write_display_buffer().is_err()
         {
-            unsafe {
-            let i2c = &(*I2C2::ptr());
-            info!("I2C: {:?}",  any_as_u8_slice(i2c));
-        }
             if HT16K33_MISSING_FATAL {
                 panic!("Failed to initialize ht16k33");
             } else {
                 error!("Failed to initialize ht16k33");
             }
-        }
-        
-        unsafe {
-            let i2c = &(*I2C2::ptr());
-            info!("I2C: {:?}",  any_as_u8_slice(i2c));
         }
         debug!("...done");
 
@@ -603,11 +384,6 @@ const APP: () = {
         led_status.off();
 
 
-        // SSR status LED
-        let mut led_ssr: LedSsrStatus = gpioa.pa10.into_push_pull_output(&mut gpioa.crh);
-        led_ssr.off();   
-
-
         // Misc en
         let mut misc_en: MiscEn = gpiob.pb15.into_push_pull_output(&mut gpiob.crh);
         misc_en.off();
@@ -643,12 +419,12 @@ const APP: () = {
             }
         }
         
-
         // SSR Timer        
         let ssr_en: SsrEn<Alternate<PushPull>> = gpioa.pa9.into_alternate_push_pull(&mut gpioa.crh);
-        let mut ssr_timer = Timer::tim1(device.TIM1, &clocks, &mut rcc.apb2)
+        let ssr_led: LedSsrStatus<Alternate<PushPull>> = gpioa.pa10.into_alternate_push_pull(&mut gpioa.crh);
+        let mut ssr_timer: SsrTimerHandle = Timer::tim1(device.TIM1, &clocks, &mut rcc.apb2)
             .pwm(
-                ssr_en,
+                (ssr_en, ssr_led),
                 &mut afio.mapr,
                 SSR_TIMER_FREQ,
             );
@@ -665,11 +441,18 @@ const APP: () = {
                 .moe().enabled()
             );
             tim.dier.modify(|_, w| w
-                .cc2ie().enabled()
+                // Enable channel 2 compare interrupt for debugging
+                //.cc2ie().enabled()
             );
             tim.ccmr1_output().modify(|_, w| w
-                // Mode 2 is idle low, hal sets it to mode 1
+                // This is channel 2, the SSR EN output
+                // Mode 2 is idle low, hal sets it to mode 1                
                 .oc2m().pwm_mode2() 
+            );
+            tim.ccmr2_output().modify(|_, w| w
+                // This is channel 3, the SSR Status LED
+                // Mode 2 is idle low, hal sets it to mode 1
+                .oc3m().pwm_mode2() 
             );
         }
 
@@ -679,29 +462,28 @@ const APP: () = {
             .start_count_down(3.hz());
         ui_timer.listen(Event::Update);
 
-        // WeldSettings
-        let weld_settings = WeldSettings::new();
-
+        let mut welder_ui = WelderUi::new();
         // Update the quad counter to match the current setting
-        weld_settings.update_quad_from_value(&mut quad_input);
+        update_quad_from_setting_value(&mut quad_input, *welder_ui.get_value_mut() as u16);
+
 
         info!("Init done");
 
         init::LateResources {
-            ui_timer: ui_timer,
+            ui_timer,
             enc_quad: quad_input,
-            zc_in: zc_in,
-            clocks: clocks,
+            zc_in,
+            clocks,
             ntc_dma_buffer: ntc_circ_buffer,
             display: ht16k33,
-            weld_settings: weld_settings,
             max31855k: max31855,
             max31855k_cs: max31855_cs_pin,
             activity_led: usr_led,
-            ssr_timer: ssr_timer,
-            enc_button: enc_button,
-            trigger_button: trigger_button,
+            ssr_timer,
+            enc_button,
+            trigger_button,
             status_led: led_status,
+            welder_ui,
         }
     }
 
@@ -715,18 +497,19 @@ const APP: () = {
     /// EXTI9_5 Interrupt handles the quad encoder button and the trigger button
     #[task(binds = EXTI9_5, resources = [
         enc_quad, 
-        weld_settings,
+        welder_ui,
         last_ntc_temp,
         last_thermocouple_temp,
         weld_triggered,
         enc_button,
         trigger_button,
+        display,
     ])]
     fn exti9_5(cx: exti9_5::Context) {        
         if cx.resources.enc_button.check_interrupt() {
             cx.resources.enc_button.clear_interrupt_pending_bit();
             debug!("EXTI encoder button pressed");
-            encoder_button_pressed(cx.resources.weld_settings, cx.resources.enc_quad);
+            encoder_button_pressed(cx.resources.welder_ui, cx.resources.enc_quad, cx.resources.display);
         } 
 
         if cx.resources.trigger_button.check_interrupt() {
@@ -743,7 +526,7 @@ const APP: () = {
         display, 
         ntc_dma_buffer, 
         enc_quad,
-        weld_settings,
+        welder_ui,
         activity_led,
         max31855k,
         max31855k_cs,
@@ -763,7 +546,7 @@ const APP: () = {
             cx.resources.max31855k, 
             cx.resources.max31855k_cs, 
             cx.resources.last_thermocouple_temp,
-            cx.resources.weld_settings, 
+            cx.resources.welder_ui, 
             cx.resources.enc_quad, 
             cx.resources.display,
         );
@@ -773,7 +556,7 @@ const APP: () = {
     /// This timer is connected to the ZC circuit (or countdown if dummy_zc feature is enabled)
     #[task(binds = TIM2, resources = [
         weld_triggered,
-        weld_settings,
+        welder_ui,
         ssr_timer,
         zc_in,
         clocks,
@@ -820,7 +603,7 @@ const APP: () = {
             WELD_STATE,
             cx.resources.weld_triggered,
             WELD_COUNTER,
-            cx.resources.weld_settings,
+            cx.resources.welder_ui,
             A_DELAY,
             B_ON,
             B_DELAY,
@@ -877,9 +660,21 @@ impl PulseSsr for SsrTimerHandle {
 }
 
 /// Called when the encoder button has been pressed, updates the UI
-fn encoder_button_pressed(weld_settings: &mut WeldSettings, enc_quad: &mut EncoderHandle) {
-    weld_settings.next();
-    weld_settings.update_quad_from_value(enc_quad);
+fn encoder_button_pressed(welder_ui: &mut WelderUi, enc_quad: &mut EncoderHandle, display: &mut DisplayHandle) {
+    if let Err(e) = welder_ui.next_screen(display) {
+        if HT16K33_MISSING_FATAL {
+            panic!("Error moving to next UI screen: {:?}", e);
+        } else {
+            error!("Error moving to next UI screen: {:?}", e);
+        }
+    } else {
+        if let Err(e) = display.write_display_buffer() {
+            if HT16K33_MISSING_FATAL {
+                panic!("HT16K33 error: {:?}", e);
+            }
+        }
+    }
+    update_quad_from_setting_value(enc_quad, *welder_ui.get_value_mut() as u16);
     info!("Encoder: {}", enc_quad.count());
 }
 
@@ -914,6 +709,7 @@ fn read_ntc_temp(dma_buffer: &mut NtcDmaBufferHandle, last_ntc_temp: &mut f32) {
 }
 
 /// Updates the last_thermocouple_temp with a value read from the max31855
+#[cfg(feature = "thermocouple")]
 fn read_thermocouple_temp(max31855: &mut Max31855Handle, max31855_cs: &mut Max31855CsHandle, last_thermocouple_temp: &mut f32) {
     match max31855.read_thermocouple(max31855_cs, Unit::Celsius) {
         Ok(v) => *last_thermocouple_temp = v,
@@ -922,9 +718,26 @@ fn read_thermocouple_temp(max31855: &mut Max31855Handle, max31855_cs: &mut Max31
 }
 
 /// Called at 3hz to update the UI from the quad reading & due to elapsed time
-fn tick_ui(weld_settings: &mut WeldSettings, enc_quad: &EncoderHandle, display: &mut DisplayHandle) {
-    weld_settings.update_from_quad(enc_quad);
-    weld_settings.tick(display);
+fn tick_ui(welder_ui: &mut WelderUi, enc_quad: &EncoderHandle, display: &mut DisplayHandle) {
+    let value = welder_ui.get_value_mut();
+    let new_value = setting_value_from_quad(enc_quad) as u32;
+    let changed = *value != new_value;
+
+    let result = if changed {
+        *value = new_value;
+        welder_ui.reset_tick(display)
+    } else {
+        welder_ui.tick(Some(display))
+    };
+
+    if let Err(e) = result {
+       if HT16K33_MISSING_FATAL {
+            panic!("Error ticking UI: {:?}", e);
+        } else {
+            error!("Error ticking UI: {:?}", e);
+        } 
+    }
+
     if let Err(e) = display.write_display_buffer() {
         if HT16K33_MISSING_FATAL {
             panic!("HT16K33 error: {:?}", e);
@@ -933,17 +746,32 @@ fn tick_ui(weld_settings: &mut WeldSettings, enc_quad: &EncoderHandle, display: 
 }
 
 /// Checks the temperatures are in acceptable range if range is specified
-fn temps_ok(ntc_temp: f32, thermocouple_temp: f32) -> (bool, bool) {
+fn temps_ok(
+    ntc_temp: f32, 
+    #[cfg_attr(not(feature = "thermocouple"), allow(unused_variables))]
+    thermocouple_temp: f32,
+) -> (bool, bool) {
     let ntc_ok = if let Some((min, max)) = NTC_RANGE {
         ntc_temp >= min && ntc_temp <= max
     } else {
         true
     };
-    let thermo_ok = if let Some((min, max)) = THERMOCOUPLE_RANGE {
-        thermocouple_temp >= min && thermocouple_temp <= max
-    } else {
-        true
-    };
+    let thermo_ok;
+
+    #[cfg(feature = "thermocouple")]
+    {
+        thermo_ok = if let Some((min, max)) = THERMOCOUPLE_RANGE {
+            thermocouple_temp >= min && thermocouple_temp <= max
+        } else {
+            true
+        };
+    }
+
+    #[cfg(not(feature = "thermocouple"))]
+    {
+        thermo_ok = true;
+    }
+
     (ntc_ok, thermo_ok)
 }
 
@@ -953,10 +781,12 @@ fn ui_timer_elapsed(
     activity_led: &mut ActivityLedHandle,
     dma_buffer: &mut NtcDmaBufferHandle, 
     last_ntc_temp: &mut f32,
+    #[cfg_attr(not(feature = "thermocouple"), allow(unused_variables))]
     max31855: &mut Max31855Handle, 
+    #[cfg_attr(not(feature = "thermocouple"), allow(unused_variables))]
     max31855_cs: &mut Max31855CsHandle, 
     last_thermocouple_temp: &mut f32,
-    weld_settings: &mut WeldSettings, 
+    welder_ui: &mut WelderUi, 
     enc_quad: &EncoderHandle, 
     display: &mut DisplayHandle,
 ) {
@@ -967,16 +797,22 @@ fn ui_timer_elapsed(
     read_ntc_temp(dma_buffer, last_ntc_temp);        
 
     // Update the thermocouple temp
+    #[cfg(feature = "thermocouple")]
     read_thermocouple_temp(max31855, max31855_cs, last_thermocouple_temp);
 
     // Tick the UI
-    tick_ui(weld_settings, enc_quad, display);
+    tick_ui(welder_ui, enc_quad, display);
 
     if *count % 20 == 0 {
+        #[cfg_attr(not(feature = "thermocouple"), allow(unused_variables))]
         let (ntc_ok, thermocouple_ok) = temps_ok(*last_ntc_temp, *last_thermocouple_temp);
-        info!("ntc_temp: {} (ok? {}), thermocouple_temperature: {} (ok? {})", 
+        info!("ntc_temp: {} (ok? {})",
             *last_ntc_temp, 
             ntc_ok, 
+        );
+
+        #[cfg(feature = "thermocouple")]
+        info!("thermocouple_temperature: {} (ok? {})",
             *last_thermocouple_temp, 
             thermocouple_ok,
         );
@@ -993,7 +829,7 @@ fn zero_crossing_event(
     weld_state: &mut WeldState,
     weld_triggered: &mut bool,
     weld_counter: &mut u16,
-    weld_settings: &WeldSettings,
+    welder_ui: &WelderUi,
     a_delay: &mut u16,
     b_on: &mut u16,
     b_delay: &mut u16,
@@ -1005,8 +841,8 @@ fn zero_crossing_event(
     clocks: &Clocks,
 ) {
     // Converts microseconds to zero crossing count
-    let pulse_us_to_zc = |us: u16, zc_period_us: u16| -> u16 {
-        (us + (zc_period_us / 2)) / zc_period_us
+    let pulse_us_to_zc = |us: u32, zc_period_us: u16| -> u16 {
+        (us as u16 + (zc_period_us / 2)) / zc_period_us
     };
 
     // Converts number of zero crossings to a pulse period microseconds
@@ -1029,28 +865,43 @@ fn zero_crossing_event(
                     .unwrap_or(0.hz()).0 as u16;
             }
 
-            let (_, actual) = ACCEPTABLE_ZC_FREQ_RANGES
+            let (_, actual_mains_freq) = ACCEPTABLE_ZC_FREQ_RANGES
                 .iter()
                 .find(|(range, _)| range.contains(&freq))
                 //TODO: Do something nicer than panic once UI is a bit more polished
                 .unwrap_or_else(|| panic!("Actual frequency ({}) is outside of acceptable ranges", freq));
 
-            *zc_period_us = 1000 / *actual;
+            *zc_period_us = 1000 / *actual_mains_freq;
+
+            let snapshot = welder_ui.settings_snapshot();
 
             *weld_state = WeldState::AWeld;
-            *weld_counter = pulse_us_to_zc(weld_settings.pulse_a_on.value, *zc_period_us);
-            *a_delay = pulse_us_to_zc(weld_settings.pulse_a_delay.value, *zc_period_us);
-            *b_on = pulse_us_to_zc(weld_settings.pulse_b_on.value, *zc_period_us);
-            *b_delay = pulse_us_to_zc(weld_settings.pulse_b_delay.value, *zc_period_us);
+            *weld_counter = pulse_us_to_zc(snapshot.a_on, *zc_period_us);
+            *a_delay = pulse_us_to_zc(snapshot.a_delay, *zc_period_us);
+            *b_on = pulse_us_to_zc(snapshot.b_on, *zc_period_us);
+            *b_delay = pulse_us_to_zc(snapshot.b_delay, *zc_period_us);
             
-            debug!("Welding. ZC counts = a_on: {}, a_delay: {}, b_on: {} b_delay: {}",
-                *weld_counter, *a_delay, *b_on, *b_delay);
 
-            ssr_timer.pulse(
-                zc_to_pulse_us(
-                    *weld_counter, 
-                    *zc_period_us) as u32
+            debug!("WELDING. Config ([set] => [actual]):");
+            debug!("  a_on: {} => {}",
+                snapshot.a_on,
+                zc_to_pulse_us(*weld_counter, *zc_period_us),
             );
+            debug!("  a_delay: {} => {}",
+                snapshot.a_delay,
+                zc_to_pulse_us(*a_delay, *zc_period_us),                
+            );
+            debug!("  b_on: {} => {}", 
+                snapshot.b_on,
+                zc_to_pulse_us(*b_on, *zc_period_us),                
+            );
+            debug!("  b_delay: {} => {}",
+                snapshot.b_delay,
+                zc_to_pulse_us(*b_delay, *zc_period_us),               
+            );
+            debug!("  mains freq: {}", actual_mains_freq);
+
+            ssr_timer.pulse(zc_to_pulse_us(*weld_counter, *zc_period_us) as u32);
         }
     } else {
         let done = if *weld_counter > 0 {
@@ -1094,11 +945,21 @@ fn zero_crossing_event(
 /// Doesn't actually use the parameter because this functionality isn't available on hal interface
 fn update_quad_count(_quad: &mut EncoderHandle, count: u16) {
     unsafe {
-        let tim = &(*TIM4::ptr());
+        let tim = &(*QuadTimer::ptr());
         tim.cr1.modify(|_, w| w.cen().clear_bit());
         tim.cnt.write(|w| w.cnt().bits(count));
         tim.cr1.modify(|_, w| w.cen().set_bit());
     }
+}
+
+/// Returns the quad count scaled to the settings range
+fn setting_value_from_quad(quad: &EncoderHandle) -> u16 {
+    quad.count() * QUAD_SCALE % 999
+}
+
+/// Reverses the setting scaling and updates the quad count
+fn update_quad_from_setting_value(quad: &mut EncoderHandle, value: u16) {
+    update_quad_count(quad, value / QUAD_SCALE);
 }
 
 /// Steinhart conversion from NTC sample to degreec celsius
@@ -1123,7 +984,10 @@ fn ntc_sample_to_degrees(sample: u16) -> f32 {
 }
 
 #[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
+fn panic(
+    #[cfg_attr(not(feature = "itm"), allow(unused_variables))]
+    info: &PanicInfo
+) -> ! {
     interrupt::disable();
 
     #[cfg(feature = "itm")]
@@ -1139,12 +1003,4 @@ fn panic(info: &PanicInfo) -> ! {
         // see rust-lang/rust#28728 for details
         atomic::compiler_fence(Ordering::SeqCst)
     }
-}
-
-unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
-    info!("Size: {}", ::core::mem::size_of::<T>());
-    ::core::slice::from_raw_parts(
-        (p as *const T) as *const u8,
-        ::core::mem::size_of::<T>(),
-    )
 }

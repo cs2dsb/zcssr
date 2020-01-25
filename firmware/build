@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 
-cargo +nightly build --release --features itm
+cargo +nightly build --release --no-default-features 
 cargo +nightly build --release --features itm,dummy_zc

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+./stop_openocd
+
+#TODO: use --message-format json to find the path to the executable instead of hard coded
+cargo +nightly build --release --bin spot_welder --features itm,dummy_zc
+openocd -f openocd.cfg -c 'init_reset halt; program target/thumbv7m-none-eabi/release/spot_welder verify reset exit'

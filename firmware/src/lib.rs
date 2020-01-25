@@ -4,3 +4,4 @@
 #![cfg_attr(feature = "bench", feature(test))]
 
 pub mod board;
+pub mod ui;

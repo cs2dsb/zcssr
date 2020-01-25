@@ -54,6 +54,10 @@ pub const DISP_DATA_TIMEOUT_US: u32 = 10000;
 pub const SSR_TIMER_FREQ: Hertz = Hertz(1);
 pub const SSR_TIMER_PERIOD_US: u32 = 1_000 / SSR_TIMER_FREQ.0;
 
+/// Scaling to apply to quadrature count
+/// This is dependent on the encoder's count/rev value
+pub const QUAD_SCALE: u16 = 5;
+
 /// Baud rate for MAX31855 SPI
 //pub const MAX31855_BAUDRATE: KiloHertz = KiloHertz(100);
 pub const MAX31855_BAUDRATE: MegaHertz = MegaHertz(4);
@@ -153,8 +157,7 @@ define_enable_output!(LedStatus, ACTIVE_HIGH);
 
 /// Status LED to indicate SSR status. Typically same state as SSR_EN
 /// TIM1_CH3
-pub type LedSsrStatus   = PA10<Output<PushPull>>;
-define_enable_output!(LedSsrStatus, ACTIVE_HIGH);
+pub type LedSsrStatus<M>   = PA10<M>;
 
 /// Output that triggers SSR to allow current flow. Active high
 /// TIM1_CH2
