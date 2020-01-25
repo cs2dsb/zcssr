@@ -12,14 +12,14 @@
     - [x] Misc output (fans etc)
     - [x] Rotary encoder
     - [x] NTC thermister
-    - [ ] Zero crossing detection circuit
+    - [x] Zero crossing detection circuit
     - [x] Trigger
     - [x] I2C display
     - [ ] USB
     - [x] Thermocouple
 
 ## Hardware
-- [ ] Add hardware debouncing to trigger
-- [ ] Add pull-up to SCL
-- [ ] Make I2C pull ups optional since adafruit module already includes them
-- [ ] Make I2C pull ups 2.2k since 3.3v not 5v
+- [x] Add hardware debouncing to trigger
+- [x] Add pull-up to SCL
+- [x] Make I2C pull ups optional since adafruit module already includes them
+- [x] Make I2C pull ups 2.2k since 3.3v not 5v
