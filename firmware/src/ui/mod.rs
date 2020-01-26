@@ -6,8 +6,8 @@ use adafruit_alphanum4::{
     Error as AlphaNumError,
 };
 
+/// A UI specific to a spot welder
 pub mod welder;
-
 
 // This is used because mem::transmute is not currently const fn (see: https://github.com/rust-lang/rust/issues/53605)
 // GenericArray also has no const initializers 
@@ -16,6 +16,11 @@ union Transmute<T: Copy, U: Copy> {
     to: U,
 }
 
+/// A hacky macro to make it slightly easier to convert characters to a GenericArray of AsciiChar
+///
+/// TODO: currently if the lhs of the constant is a different size to the number of characters the
+///       string will be truncated (or random memory maybe???). A proc macro that accepts an actual
+///       &str and returns exactly the correct type instead of having to use Transmute would be nicer
 #[macro_export]
 macro_rules! ascii_str {
     ($($x:expr),+$(,)*) => {
@@ -26,9 +31,14 @@ macro_rules! ascii_str {
 const BLANK: AsciiChar = AsciiChar::new(' ');
 const DISPLAY_CHARS: usize = 4;
 
+/// A text based message with no value or collapsed form
 pub type Message<N> = GenericArray<AsciiChar, N>;
 
-pub trait Displayable: Default + Copy{
+/// Trait to make different values displayable on the adafruit_alphanum4 display
+///
+/// TODO: move into adafruit_alphanum4 library maybe?
+pub trait Displayable: Default + Copy {
+    /// Display self on the provided display at provided index if possible
     fn display<D, T>(&self, display: &mut D, index: Index) -> Result<(), AlphaNumError> 
     where
         D: AlphaNum4<T>;
@@ -75,6 +85,7 @@ impl Displayable for u32 {
     }
 }
 
+/// A setting that has a collapsed form, expanded message and a value
 pub struct Setting<N: ArrayLength<AsciiChar>, V: Displayable> {
     message: Message<N>,
     single_character: AsciiChar,
@@ -82,13 +93,15 @@ pub struct Setting<N: ArrayLength<AsciiChar>, V: Displayable> {
     value: V,
 }
 
-
+/// Possible screen variants
 pub enum Screen<N: ArrayLength<AsciiChar>, V: Displayable> {
+    /// A text message with no associated value or collapsed form
     Message(Message<N>),
+    /// A setting with a value, collapsed form and text message expansion
     Setting(Setting<N, V>),
 }
 
-// Gets the mutable value of a setting. Panics if the screen isn't a setting
+/// Gets the mutable value of a setting. Panics if the screen isn't a setting
 pub fn unwrap_setting_value_mut<N, V>(screen: &mut Screen<N, V>) -> &mut V
 where
     N: ArrayLength<AsciiChar>,
@@ -101,7 +114,7 @@ where
 }
 
 
-// Gets the immutable value of a setting. Panics if the screen isn't a setting
+/// Gets the immutable value of a setting. Panics if the screen isn't a setting
 pub fn unwrap_setting_value<N, V>(screen: &Screen<N, V>) -> &V
 where
     N: ArrayLength<AsciiChar>,
@@ -113,6 +126,7 @@ where
     }
 }
 
+/// The data required to show the 4 character representation of a setting
 #[derive(Default)]
 pub struct CollapsedForm<V> {
     character: AsciiChar,
@@ -141,7 +155,7 @@ impl<N: ArrayLength<AsciiChar>, V: Displayable> Screen<N, V> {
     }
 }
 
-
+/// Structure that tracks the current state of the UI text scrolling and expanding
 pub struct Ui {
     pos: usize,
     expanded: bool,
@@ -151,6 +165,7 @@ pub struct Ui {
 }
 
 impl Ui {
+    /// Creates a new UI with the position, tick and expanded state set to defaults
     pub const fn new(ticks_per_scroll: usize, ticks_before_expand: Option<usize>) -> Self {
         Self {
             pos: 0,

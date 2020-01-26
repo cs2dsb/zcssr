@@ -16,6 +16,7 @@ const MESSAGE_A_DELAY: GenericArray<AsciiChar, U23> = ascii_str!('D', 'E', 'L', 
 const MESSAGE_B_ON: GenericArray<AsciiChar, U19> = ascii_str!('S', 'E', 'C', 'O', 'N', 'D', ' ', 'P', 'U', 'L', 'S', 'E', ' ', 'L', 'E', 'N', 'G', 'T', 'H');
 const MESSAGE_B_DELAY: GenericArray<AsciiChar, U24> = ascii_str!('D', 'E', 'L', 'A', 'Y', ' ', 'A', 'F', 'T', 'E', 'R', ' ', 'S', 'E', 'C', 'O', 'N', 'D', ' ', 'P', 'U', 'L', 'S', 'E');
 
+/// The UI for a spot welder
 pub struct WelderUi {
     ui: Ui,
     screen_1: Screen<U18, u32>,
@@ -26,22 +27,16 @@ pub struct WelderUi {
 }
 
 
+/// The values of settings configured by this UI
 pub struct WelderSettings {
+    /// The on time for the first pulse
     pub a_on: u32,
+    /// The delay after the first pulse
     pub a_delay: u32,
+    /// The on time for the second pulse
     pub b_on: u32,
+    /// The delay after the second pulse
     pub b_delay: u32,
-}
-
-impl WelderSettings {
-    pub const fn new() -> Self {
-        Self {
-            a_on: 0,
-            a_delay: 0,
-            b_on: 0,
-            b_delay: 0,
-        }
-    }
 }
 
 // Calls the provided closure with &mut self.ui and &mut self.screen_x as parameters
@@ -68,6 +63,7 @@ macro_rules! match_screen {
 }
 
 impl WelderUi {
+    /// Create an instance of the WelderUi
     pub const fn new() -> Self {
         Self {
             ui: Ui::new(2, Some(15)),
@@ -99,6 +95,7 @@ impl WelderUi {
         }
     }
 
+    /// Move to the next screen
     pub fn next_screen<D, T>(&mut self, display: &mut D) -> Result<(), AlphaNumError>
     where
         D: AlphaNum4<T>,
@@ -112,6 +109,9 @@ impl WelderUi {
         match_screen!(self, |ui: &mut Ui, screen| ui.update_display(display, screen))
     }
 
+    /// Tick the ui display. This should be called regularly to cause the text
+    /// to update, scroll, expand, etc. The Ui is configured to be ticked at 3Hz
+    /// by default but this could be changed to tune responsiveness or scroll speed
     pub fn tick<D, T>(&mut self, display: Option<&mut D>) -> Result<(), AlphaNumError>
     where
         D: AlphaNum4<T>,
@@ -119,10 +119,14 @@ impl WelderUi {
         match_screen!(self, |ui: &mut Ui, screen| ui.tick(display, screen))
     }
 
+    /// Get a mutable reference to the current screen's value
+    /// panics if the current screen is not a Setting (which they all currently are)
     pub fn get_value_mut(&mut self) -> &mut u32 {
         match_screen!(self, |_: &mut Ui, screen| unwrap_setting_value_mut(screen))
     }
 
+    /// Reset the effects of ticking the screen
+    /// This collapses the screen if it was expanded and resets the scrolling pos 
     pub fn reset_tick<D, T>(&mut self, display: &mut D) -> Result<(), AlphaNumError>
     where 
         D: AlphaNum4<T>,
@@ -131,6 +135,7 @@ impl WelderUi {
         match_screen!(self, |ui: &mut Ui, screen| ui.update_display(display, screen))
     }
 
+    /// Grabs the current values from each screen and returns them as a WelderSettings
     pub fn settings_snapshot(&self) -> WelderSettings {
         WelderSettings {
             a_on: *unwrap_setting_value(&self.screen_1),
