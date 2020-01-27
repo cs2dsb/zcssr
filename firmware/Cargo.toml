@@ -10,8 +10,8 @@ cortex-m              = "0.6.0"
 cortex-m-rt           = "0.6.9"
 cortex-m-rtfm         = "0.5.0"
 stm32f1               = "0.8.0"
-#stm32f1xx-hal         = { git = "https://github.com/stm32-rs/stm32f1xx-hal", features = ["stm32f103", "rt", "high"] }
-stm32f1xx-hal         = { path = "../../stm32f1xx-hal", features = ["stm32f103", "rt", "high"] }
+stm32f1xx-hal         = { git = "https://github.com/stm32-rs/stm32f1xx-hal", features = ["stm32f103", "rt", "high"], rev = "58d286f" }
+#stm32f1xx-hal         = { path = "../../stm32f1xx-hal", features = ["stm32f103", "rt", "high"] }
 embedded-hal          = { version = "0.2.3", features = ["unproven"] }
 itm_logger            = { git = "https://github.com/cs2dsb/itm_logger.rs", default-features = false }
 #itm_logger            = { path = "../../itm_logger", default-features = false }
@@ -23,6 +23,7 @@ typenum               = "1.11.2"
 generic-array         = "0.13.2"
 ascii                 = { version = "1.0.0", default-features = false }
 nb                    = "0.1.2"
+i2c_hung_fix          = "0.1.0"
 
 [features]
 default = [ "itm" ]

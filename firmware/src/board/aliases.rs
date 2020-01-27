@@ -152,6 +152,5 @@ pub type KThermoSck     = PB13<Alternate<PushPull>>;
 /// Spi2
 pub type KThermoMiso    = PB14<Input<Floating>>;
 
-
 /// Complete handle for the MAX31855 thermocouple
 pub type Thermocouple = (Spi<SPI2, Spi2NoRemap, (KThermoSck, KThermoMiso, NoMosi)>, KThermoNss);

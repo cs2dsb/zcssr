@@ -22,7 +22,6 @@ use stm32f1xx_hal::{
     i2c::{
         I2c,
         blocking_i2c,
-        HungFix,
         Error as I2cError,
     },
     pac::{
@@ -33,6 +32,12 @@ use stm32f1xx_hal::{
         DBGMCU,
     },
     delay::Delay,
+    qei::QeiOptions,
+};
+use i2c_hung_fix::{
+    try_unhang_i2c,
+    RECOMMENDED_MAX_CLOCK_CYCLES,
+    Error as HungError,
 };
 use itm_logger::*;
 use super::{
@@ -57,6 +62,8 @@ use ht16k33::{
 
 use nb::Error as NbError;
 
+use core::convert::Infallible;
+
 /// Errors that can be returned by Configure::configure
 #[derive(Debug)]
 pub enum Error {
@@ -64,6 +71,8 @@ pub enum Error {
     I2cNbError(NbError<I2cError>),
     /// An I2C error
     I2cError(I2cError),
+    /// The hang fix has failed and the bus appears to be hung
+    I2cHung(HungError<Infallible>),
 }
 
 impl From<NbError<I2cError>> for Error {
@@ -75,6 +84,12 @@ impl From<NbError<I2cError>> for Error {
 impl From<I2cError> for Error {
     fn from(e: I2cError) -> Self {
         Error::I2cError(e)
+    }
+}
+
+impl From<HungError<Infallible>> for Error {
+    fn from(e: HungError<Infallible>) -> Self {
+        Error::I2cHung(e)
     }
 }
 
@@ -119,18 +134,21 @@ impl<'a> Configure<'a> for Display {
         dwt.enable_cycle_counter();
 
         // Temporarily configure the scl as output to run the hung fux
-        let mut pins = (
-            scl.into_push_pull_output_with_state(cr, State::High),
-            sda,
-        );
-
+        let mut scl = scl.into_push_pull_output_with_state(cr, State::High);
+        
         // Run the hung fix
-        pins.try_hung_fix(delay, DISP_I2C_MODE)?;
+        try_unhang_i2c(
+            &mut scl,
+            &sda,
+            delay,
+            DISP_BAUDRATE.0,
+            RECOMMENDED_MAX_CLOCK_CYCLES,
+        )?;
 
         // Convert the pins into alternate mode for I2C
         let pins = (
-            pins.0.into_alternate_open_drain(cr),
-            pins.1.into_alternate_open_drain(cr),
+            scl.into_alternate_open_drain(cr),
+            sda.into_alternate_open_drain(cr),
         );
         
         // Create the hal i2c peripheral
@@ -258,7 +276,7 @@ impl<'a> Configure<'a> for Encoder {
     );
     fn configure((a, b, tim, clocks, apb1, mapr): Self::Params) -> Result<Self, Error> {
         Ok(Timer::tim4(tim, &clocks, apb1)
-            .qei((a, b), mapr))
+            .qei((a, b), mapr, QeiOptions::default()))
     }
 }
 
