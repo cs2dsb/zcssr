@@ -4,7 +4,9 @@
 
 #![no_std]
 
-#![feature(const_fn)]
+// Required for helper_macros::str_to_slice
+#![feature(proc_macro_hygiene)]
+
 #![cfg_attr(feature = "bench", feature(test))]
 
 #![deny(warnings, missing_docs)]

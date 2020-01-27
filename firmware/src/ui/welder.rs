@@ -5,16 +5,20 @@ use adafruit_alphanum4::{
     AlphaNum4,
     Error as AlphaNumError,
 };
+use helper_macros::str_to_generic_array_of_ascii_char;
 
-use crate::{
-    ascii_str,
-    ui::{ Ui, Screen, Setting, unwrap_setting_value_mut, unwrap_setting_value },
+use crate::ui::{ 
+    Ui, 
+    Screen, 
+    Setting, 
+    unwrap_setting_value_mut, 
+    unwrap_setting_value,
 };
 
-const MESSAGE_A_ON: GenericArray<AsciiChar, U18> = ascii_str!('F', 'I', 'R', 'S', 'T', ' ', 'P', 'U', 'L', 'S', 'E', ' ', 'L', 'E', 'N', 'G', 'T', 'H');
-const MESSAGE_A_DELAY: GenericArray<AsciiChar, U23> = ascii_str!('D', 'E', 'L', 'A', 'Y', ' ', 'A', 'F', 'T', 'E', 'R', ' ', 'F', 'I', 'R', 'S', 'T', ' ', 'P', 'U', 'L', 'S', 'E');
-const MESSAGE_B_ON: GenericArray<AsciiChar, U19> = ascii_str!('S', 'E', 'C', 'O', 'N', 'D', ' ', 'P', 'U', 'L', 'S', 'E', ' ', 'L', 'E', 'N', 'G', 'T', 'H');
-const MESSAGE_B_DELAY: GenericArray<AsciiChar, U24> = ascii_str!('D', 'E', 'L', 'A', 'Y', ' ', 'A', 'F', 'T', 'E', 'R', ' ', 'S', 'E', 'C', 'O', 'N', 'D', ' ', 'P', 'U', 'L', 'S', 'E');
+const MESSAGE_A_ON: GenericArray<AsciiChar, U18> = str_to_generic_array_of_ascii_char!("FIRST PULSE LENGTH");
+const MESSAGE_A_DELAY: GenericArray<AsciiChar, U23> = str_to_generic_array_of_ascii_char!("DELAY AFTER FIRST PULSE");
+const MESSAGE_B_ON: GenericArray<AsciiChar, U19> = str_to_generic_array_of_ascii_char!("SECOND PULSE LENGTH");
+const MESSAGE_B_DELAY: GenericArray<AsciiChar, U24> = str_to_generic_array_of_ascii_char!("DELAY AFTER SECOND PULSE");
 
 /// The UI for a spot welder
 pub struct WelderUi {

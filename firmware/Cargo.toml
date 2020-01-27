@@ -24,6 +24,7 @@ generic-array         = "0.13.2"
 ascii                 = { version = "1.0.0", default-features = false }
 nb                    = "0.1.2"
 i2c_hung_fix          = "0.1.0"
+helper_macros         = { path = "../helper_macros" }
 
 [features]
 default = [ "itm" ]

@@ -9,25 +9,6 @@ use adafruit_alphanum4::{
 /// A UI specific to a spot welder
 pub mod welder;
 
-// This is used because mem::transmute is not currently const fn (see: https://github.com/rust-lang/rust/issues/53605)
-// GenericArray also has no const initializers 
-union Transmute<T: Copy, U: Copy> {
-    from: T,
-    to: U,
-}
-
-/// A hacky macro to make it slightly easier to convert characters to a GenericArray of AsciiChar
-///
-/// TODO: currently if the lhs of the constant is a different size to the number of characters the
-///       string will be truncated (or random memory maybe???). A proc macro that accepts an actual
-///       &str and returns exactly the correct type instead of having to use Transmute would be nicer
-#[macro_export]
-macro_rules! ascii_str {
-    ($($x:expr),+$(,)*) => {
-        unsafe { crate::ui::Transmute { from: [$(ascii::AsciiChar::new($x),)+] }.to }
-    };
-}
-
 const BLANK: AsciiChar = AsciiChar::new(' ');
 const DISPLAY_CHARS: usize = 4;
 
