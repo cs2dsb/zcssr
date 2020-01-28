@@ -80,3 +80,51 @@
 ## 16-Nov-2019
 
 * Placed an order for the next version of the PCB
+
+## 29-Nov-2019
+
+* v0.2 PCBs arrived
+* Updated the board pin hardware definitions
+* Tested all the previously implemented features
+    * It all still works
+* RGB led added in this version is oriented incorrectly
+* Haven't tested USB
+
+## 9-Jan-2020
+
+* Finished implementing [MAX31855](https://github.com/cs2dsb/max31855.rs) and testing thermocouple
+
+## 14-Jan-2020
+
+* Tested RTFM 5: issue I was previously seeing with hardware interrupts not getting called appears to be resolved
+* Converted spot_welder to use RTFM 5 and some general housekeeping
+
+## 19-Jan-2020
+
+* Fitted the new hardware into the case and hooked up a transformer to test the ZC and mains side of things
+* All working as expected - probably shouldn't be surprising but after taking a 2 month break I automatically assume all the hardware and code was rubbish and wouldn't work.
+
+## 25-Jan-2020
+
+* Brought all the tested bits a pieces together into basically finished spot welder
+    * UI settings are snapshotted when the weld is triggered
+    * Oscilloscope shows pulse lengths match configured values
+* Refactored the UI out into zcssr lib
+    * I originally thought it might be a useful reusable thing but actually a 4 digit display controlled with a rotary encoder is probably too specific to be much use elsewhere. Maybe it can be extracted later; some of the code like scrolling text might be useful...
+    * As part of the refactoring I converted the display strings into GenericArray<AsciiChar, typenum::Uxx> and got rid of the current text buffer. This means there's no copying the strings when changing screens and each string is only as long as necessary not some MAX_LENGTH constant. I haven't worked out the memory savings but it feels better to have a zero cost, no copying version.
+    * Experimented with using trait objects/dynamic dispatch to make the Ui/Screen api nicer but found that dynamic dispatch introduced a measurable (oscilloscope on toggled IO pin) delay of several hundred cycles. Since I'm matching on the current screen anyway static dispatch isn't much more of a hassle but does prevent something clean like self.with_current_screen(|screen| screen.do_the_thing()). To reduce duplicated match (self.current_screen) blocks I made a macro to plop the match around a closure - it basically mimics the api I would have done with trait objects except the closures are manually monomorphised by the macro.
+* Trigger cable is picking up noise and causing the interrupt to run erroneously
+    * Added hardware debouncing to the trigger input
+    * Since a false interrupt on the trigger could cause a weld at an inopportune time I'll have to revisit it once the HW debouncing is in to see if I need to add a software solution on top - requiring a press longer than a given time and not occuring again within a given time would be fairly easy to implement and could provide more safety.
+* Related to trigger noise, I'm also seeing erroneous data on the UART dongle I'm using when big mains devices turn on/off in the same room (electic heater, lights, printer). This happens when the mains plug for the ZCSSR isn't connected and everything is powered over USB so I don't really know what the exact cause is - the UART dongle has a high quality shielded cable, maybe it's noise being conducted to the USB ground? Who knows...
+
+## 26-Jan-2020
+
+* Moved majority of the hardware configuration out of spot_welder (the bin) into the crate board.rs
+    * This should mean that creating new bins for reflow_oven, sous_vide, etc. will reuse most of this code and be fairly trivial - just the control algorithms for those specifc devices
+    * The pattern I went for is the board has a trait `Configure` which it implements for the type aliases it defines for the hardware. The consumer then does `LedStatus::configure((gpiox.px1, etc))` to get a configured `LedStatus` back. The pattern of having an associated type on the trait that specifies the requred parameters was nicked from amethyst.rs's system trait. I'm not sure if this gives any benefit over a simple function configure_led_status(...)
+
+## 27-Jan-2020
+
+* Took the I2C hung fix I hacked into local copy of the hal out and put it in a separate crate: [i2c_hung_fix](https://github.com/cs2dsb/i2c_hung_fix.rs) since it only needs embedded-hal InputPin and Output pin and should work for anything that implements those on the I2C pins
+* Moved the UI string to GenericArray code into a proc_macro so that the length of the array is correctly enforced. It still uses unsafe union transmuting but both sides lengths are calculated in the proc macro instead of manually entered so it should be safe enough. Once core::mem::transmute becomes a const_fn this will be unnecessary [see #53605](https://github.com/rust-lang/rust/issues/53605)
