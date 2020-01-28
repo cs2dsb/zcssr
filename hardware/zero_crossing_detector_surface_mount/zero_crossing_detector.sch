@@ -2997,7 +2997,7 @@ U 1 1 5E417894
 P 2350 6650
 F 0 "JP2" V 2300 6500 50  0000 L CNN
 F 1 "SolderJumper_2_Open" V 2450 6450 50  0001 L CNN
-F 2 "Jumper:SolderJumper-2_P1.3mm_Open_TrianglePad1.0x1.5mm" H 2350 6650 50  0001 C CNN
+F 2 "Custom:SolderJumper-2_P1.3mm_Open_TrianglePad1.0x1.5mm" H 2350 6650 50  0001 C CNN
 F 3 "~" H 2350 6650 50  0001 C CNN
 	1    2350 6650
 	0    1    1    0   
@@ -3019,7 +3019,7 @@ U 1 1 5E451974
 P 2350 5800
 F 0 "JP1" V 2300 5650 50  0000 L CNN
 F 1 "SolderJumper_2_Open" V 2450 5600 50  0001 L CNN
-F 2 "Jumper:SolderJumper-2_P1.3mm_Open_TrianglePad1.0x1.5mm" H 2350 5800 50  0001 C CNN
+F 2 "Custom:SolderJumper-2_P1.3mm_Open_TrianglePad1.0x1.5mm" H 2350 5800 50  0001 C CNN
 F 3 "~" H 2350 5800 50  0001 C CNN
 	1    2350 5800
 	0    1    1    0   
