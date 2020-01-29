@@ -43,14 +43,6 @@ use stm32f1xx_hal::{
 };
 use ht16k33::HT16K33;
 
-/*
-RGB led is rotated incorrectly on current batch of PCBs
-pub type RgbRLed = PA4<Output<PushPull>>;
-pub type RgbBLed = PA5<Output<PushPull>>;
-pub type RgbGLed = PA6<Output<PushPull>>;
-*/
-
-
 /// Zero crossing timer reads pwm input from the zero crossing detection circuit (or a dummy count down timer if dummy_zc feature is enabled)
 pub type ZcTim = TIM2;
 /// Quadrature encoder timer reads the quad input from the rotary encoder
