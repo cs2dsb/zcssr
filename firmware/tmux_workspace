@@ -47,7 +47,7 @@ else
 
         tmux send-keys -t $SESSION_NAME.0 ./watch Enter
 
-        tmux send-keys -t $SESSION_NAME.1 "cd ../../itm_log" Enter
+        tmux send-keys -t $SESSION_NAME.1 ./monitor_itm Enter
         tmux send-keys -t $SESSION_NAME.1 ./watch Enter
 
         tmux send-keys -t $SESSION_NAME.3 ./run_openocd Enter

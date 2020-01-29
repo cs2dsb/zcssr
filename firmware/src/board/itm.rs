@@ -5,10 +5,7 @@ use {
         logger_init, 
         update_tpiu_baudrate,
     },
-    stm32f1xx_hal::{
-        pac::ITM,
-        time::Hertz,
-    },
+    stm32f1xx_hal::time::Hertz,
     super::constants::{ ITM_BAUDRATE, HSI },
 }; 
 
@@ -20,14 +17,6 @@ pub fn itm_reset() {
         let baud: Hertz = ITM_BAUDRATE.into();
         update_tpiu_baudrate(hsi.0, baud.0).expect("Failed to reset TPIU baudrate");
         logger_init();
-
-        unsafe {
-            //TODO: move to itm_logger crate
-            (*ITM::ptr()).tcr.modify(|w|
-                // Enable local timestamps
-                w | (1 << 1)
-            );
-        }
     }
 }
 

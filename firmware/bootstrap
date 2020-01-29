@@ -2,7 +2,11 @@
 set -e
 
 # Check for pre-requeisites
-gcc --version && openocd --version && gdb-multiarch --version || (echo "Install gcc, gdb and openocd. Try 'apt install -y gcc openocd gdb-multiarch' if you are on using ubuntu" && exit 1)
+MSG="Install gcc, gdb, openocd and libudev-dev. For distros that use apt, try 'apt-get install -y gcc openocd gdb-multiarch libudev-dev'"
+gcc --version > /dev/null 2>&1 || (echo $MSG && exit 1)
+openocd --version > /dev/null 2>&1 || (echo $MSG && exit 1)
+gdb-multiarch --version > /dev/null 2>&1 || (echo $MSG && exit 1) 
+ldconfig -p | grep libudev > /dev/null 2>&1 || (echo $MSG && exit 1)
 
 # Download and install rustup if it's missing
 rustup -V || curl https://sh.rustup.rs -sSf | sh
@@ -21,6 +25,10 @@ fi
 # Install cargo-watch is it's not already installed
 if ! cargo watch -V >/dev/null 2>&1; then
     cargo install -f cargo-watch
+fi
+
+if ! serialitm --help > /dev/null 2>&1; then
+    cargo install -f serialitm
 fi
 
 # Install llvm-tools-preview

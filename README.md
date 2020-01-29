@@ -62,16 +62,41 @@ Not a complete list. Will add to it as features get implemented
 * Run `./bootstrap` script which will:
   * Initialize git submodules
   * Run `firmware/bootstrap` which will:
+    * Checks if OS dependencies are installed
+      * Currently `gcc`, `gdb`, `openocd` and `libudev-dev`
+      * `sudo firmware/install_apt_deps` will install these deps if you are using a distribution that uses `apt`
     * Install or update rustup
     * Install required rust embedded toolchains
-    * Install cargo-binutils
-    * Install cargo-watch
-    * Install llvm-tools-preview
+    * Install utils from crates.io
+      * cargo-binutils
+      * cargo-watch
+      * llvm-tools-preview
+      * serialitm
     * Run a cargo check, build and doc of the firmware (will take quite a while the first time)
+* Direct flashing the the device
+  * `firmware/deploy_standalone` will start openocd, flash the program and restart the device
+* Debugging with gdb
+  * `firmware/run_openocd` in one terminal
+  * `firmware/release` or `firmware/debug` to build and launch gdb
+  * Take a look at `firmware/openocd.gdb` and the scripts above to tweak the behaviour
+* Log output
+  * Firmware built with `--feature itm` will log over SWD
+  * `firmware/monitor_itm` will launch `serialitm` to print this output with the ITM control characters stripped out. You may need to tweak the script if your uart dongle isn't `/dev/ttyUSB0`
+* Tmux
+  * `firmware/tmux_workspace` is a script that will open a tmux session with `firmware/run_openocd`, `firmware/monitor_itm` and `firmware/watch` in differnt panes to make development easy. Just type `./release` in one of the spare panes to deploy the software with gdb
+
+### ITM logging
+
+The code uses ITM logging to indicate start up progress and log info like temperatures and user config. If the ITM feature is enabled, the microcontroller won't run without openocd connected because there is some debug config openocd does to the chip that makes ITM work. I've added the obvious checks to the [itm_logger](https://github.com/cs2dsb/itm_logger.rs) crate but there's still something missing that I haven't got to the bottom of yet. There's [an issue](https://github.com/cs2dsb/itm_logger.rs/issues/1) to track it. The bottom line is if you want to be able to plug the hardware into the mains without OpenOCD connected you need to disable the `itm` feature (`firmware/deploy_standalone` already does this.)
 
 ### More info
 
 Check [the docs folder](docs) for information on setting up the dev environment and various info on making the hardware.
+
+## Mains warning
+
+* Mains is dangerous, see the disclaimer
+* A specific issue you might hit is powering the device over USB during development then plugging the mains in while the USB dongle is still attached. The mains will power the AC/DC on the board and that will backfeed 5v into the 3.3v/5v provided by the dongle. It's fine to leave the dongle connected if you disconnect it's 3.3v/5v line - only ground, swd, swclk should be connected to the ST-LINK if you want to plug the mains in. The UART connected to ground and swo is also fine. If you do backfeed 5v to the ST-LINK expect the ST-LINK to break as a minimum and the USB port it's connected to as a worst case. 
 
 ## Disclaimer
 

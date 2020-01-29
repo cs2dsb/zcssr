@@ -128,3 +128,11 @@
 
 * Took the I2C hung fix I hacked into local copy of the hal out and put it in a separate crate: [i2c_hung_fix](https://github.com/cs2dsb/i2c_hung_fix.rs) since it only needs embedded-hal InputPin and Output pin and should work for anything that implements those on the I2C pins
 * Moved the UI string to GenericArray code into a proc_macro so that the length of the array is correctly enforced. It still uses unsafe union transmuting but both sides lengths are calculated in the proc macro instead of manually entered so it should be safe enough. Once core::mem::transmute becomes a const_fn this will be unnecessary [see #53605](https://github.com/rust-lang/rust/issues/53605)
+
+## 29-Jan-2020
+
+* Shifted the PCB around to put the AC/DC supply is right on one of the short edges of the board in the hope this will fit more comfortably next to an SSR inside the enclosure
+* Removed the RGB led, I only added it on a whim to test how bright and small the LED was. It's not much use inside the enclosure and it adds to the SMD assembly cost
+* Switched from using hacky d2xx ITM log utility to [serialitm](https://crates.io/crates/serialitm) from crates.io which does everything needed for this project
+    * If I add typed ITM data output for the reflow oven/sous vide to log temperatures I may need some extra features but this util is sufficient for now
+* Updated bootstrap scripts and readme
