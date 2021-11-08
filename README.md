@@ -45,7 +45,7 @@ I also wanted to completely finish an embedded project written in rust and this 
 
 Not a complete list. Will add to it as features get implemented
 
-* [Kicad](http://www.kicad-pcb.org/)
+* [Kicad](http://www.kicad.org/)
 * [Rust](http://www.rust-lang.org/)
   * [cortex-m](http://github.com/rust-embedded/cortex-m) and [cortex-m-rt](http://github.com/rust-embedded/cortex-m-rt)
   * [cortex-m-rtfm RTOS](http://github.com/rtfm-rs/cortex-m-rtfm)
